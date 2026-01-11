@@ -4,11 +4,14 @@ import logging
 import threading
 import webbrowser
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 
 from PIL import Image
 import pystray
 from pystray import MenuItem, Menu
+
+if TYPE_CHECKING:
+    from .config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -18,22 +21,28 @@ class SystemTray:
 
     def __init__(
         self,
+        config: Optional["Config"] = None,
         on_toggle: Optional[Callable[[bool], None]] = None,
         on_exit: Optional[Callable[[], None]] = None,
         get_match_url: Optional[Callable[[], Optional[str]]] = None,
+        on_setting_change: Optional[Callable[[str, bool], None]] = None,
     ):
         """Initialize system tray.
 
         Args:
+            config: Configuration object for reading/writing settings
             on_toggle: Callback when presence is toggled (receives new state)
             on_exit: Callback when exit is clicked
             get_match_url: Callback to get current match URL
+            on_setting_change: Callback when a display setting changes (key, value)
         """
+        self.config = config
         self.on_toggle = on_toggle
         self.on_exit = on_exit
         self.get_match_url = get_match_url
+        self.on_setting_change = on_setting_change
 
-        self._enabled = True
+        self._enabled = config.is_enabled if config else True
         self._status = "Starting..."
         self._icon: Optional[pystray.Icon] = None
         self._thread: Optional[threading.Thread] = None
@@ -44,12 +53,17 @@ class SystemTray:
         Returns:
             PIL Image for the tray icon
         """
-        # Try to load custom icon
-        icon_path = Path(__file__).parent.parent / "assets" / "icon.ico"
+        icon_path = Path(__file__).parent.parent / "assets" / "tray_icon.png"
 
         if icon_path.exists():
             try:
-                return Image.open(icon_path)
+                img = Image.open(icon_path)
+                # Convert to RGBA for proper transparency support
+                if img.mode != "RGBA":
+                    img = img.convert("RGBA")
+                # Resize for consistent display across DPI settings
+                img = img.resize((64, 64), Image.Resampling.LANCZOS)
+                return img
             except Exception as e:
                 logger.warning(f"Failed to load icon: {e}")
 
@@ -57,12 +71,74 @@ class SystemTray:
         img = Image.new("RGB", (64, 64), color=(255, 85, 0))
         return img
 
+    def _get_setting(self, key: str, default: bool = True) -> bool:
+        """Get a setting value from config.
+
+        Args:
+            key: Setting key
+            default: Default value if not found
+
+        Returns:
+            Setting value
+        """
+        if self.config:
+            return self.config.get(key, default)
+        return default
+
+    def _toggle_setting(self, key: str) -> Callable:
+        """Create a toggle handler for a setting.
+
+        Args:
+            key: Setting key to toggle
+
+        Returns:
+            Click handler function
+        """
+        def handler(icon: pystray.Icon, item: MenuItem) -> None:
+            if self.config:
+                new_value = not self.config.get(key, True)
+                self.config.set(key, new_value)
+                logger.info(f"Setting '{key}' changed to {new_value}")
+                if self.on_setting_change:
+                    self.on_setting_change(key, new_value)
+                icon.update_menu()
+        return handler
+
     def _create_menu(self) -> Menu:
         """Create the tray menu.
 
         Returns:
             pystray Menu object
         """
+        # Display settings submenu
+        display_settings = Menu(
+            MenuItem(
+                "Show Average ELO",
+                self._toggle_setting("show_avg_elo"),
+                checked=lambda item: self._get_setting("show_avg_elo"),
+            ),
+            MenuItem(
+                "Show Round Score",
+                self._toggle_setting("show_score"),
+                checked=lambda item: self._get_setting("show_score"),
+            ),
+            MenuItem(
+                "Show K/D/A Stats",
+                self._toggle_setting("show_kda"),
+                checked=lambda item: self._get_setting("show_kda"),
+            ),
+            MenuItem(
+                "Show ELO Change",
+                self._toggle_setting("show_elo"),
+                checked=lambda item: self._get_setting("show_elo"),
+            ),
+            MenuItem(
+                "Show Map Name",
+                self._toggle_setting("show_map"),
+                checked=lambda item: self._get_setting("show_map"),
+            ),
+        )
+
         return Menu(
             MenuItem(
                 lambda text: f"Status: {self._status}",
@@ -71,9 +147,15 @@ class SystemTray:
             ),
             Menu.SEPARATOR,
             MenuItem(
-                lambda text: "Disable Rich Presence" if self._enabled else "Enable Rich Presence",
+                lambda text: "Disable Tracking" if self._enabled else "Enable Tracking",
                 self._toggle_presence,
+                checked=lambda item: self._enabled,
             ),
+            MenuItem(
+                "Display Settings",
+                display_settings,
+            ),
+            Menu.SEPARATOR,
             MenuItem(
                 "View Current Match",
                 self._open_match,

@@ -212,6 +212,7 @@ class MatchMonitor:
         show_avg_elo = self.config.get("show_avg_elo", True)
         show_kda = self.config.get("show_kda", True)
         show_elo = self.config.get("show_elo", True)
+        show_score = self.config.get("show_score", True)
 
         if match.status in ("READY", "VOTING", "CONFIGURING"):
             # Pre-match lobby
@@ -239,6 +240,7 @@ class MatchMonitor:
                 show_map=show_map,
                 show_avg_elo=show_avg_elo,
                 show_kda=show_kda,
+                show_score=show_score,
             )
 
         elif match.status == "FINISHED":
@@ -254,6 +256,7 @@ class MatchMonitor:
                 match,
                 elo_change=elo_change,
                 show_elo=show_elo,
+                show_score=show_score,
             )
 
         elif match.status == "CANCELLED":

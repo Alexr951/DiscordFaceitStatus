@@ -60,10 +60,16 @@ def main() -> int:
         """Handle error from monitor."""
         tray.update_status(f"Error: {error}")
 
+    def on_setting_change(key: str, value: bool) -> None:
+        """Handle display setting change from tray menu."""
+        logger.info(f"Display setting changed: {key} = {value}")
+
     tray = SystemTray(
+        config=config,
         on_toggle=on_toggle,
         on_exit=on_exit,
         get_match_url=monitor.get_current_match_url,
+        on_setting_change=on_setting_change,
     )
 
     # Set up monitor callbacks

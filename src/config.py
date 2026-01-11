@@ -17,6 +17,7 @@ class Config:
         "show_avg_elo": True,
         "show_kda": True,
         "show_map": True,
+        "show_score": True,
         "enabled": True,
     }
 

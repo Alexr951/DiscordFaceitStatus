@@ -115,6 +115,7 @@ class DiscordRPC:
         show_map: bool = True,
         show_avg_elo: bool = True,
         show_kda: bool = True,
+        show_score: bool = True,
     ) -> None:
         """Update presence for live match state.
 
@@ -124,6 +125,7 @@ class DiscordRPC:
             show_map: Whether to show map name
             show_avg_elo: Whether to show average ELO
             show_kda: Whether to show K/D/A stats
+            show_score: Whether to show round score
         """
         # Build details line: "de_mirage | 8 - 5"
         parts = []
@@ -131,11 +133,12 @@ class DiscordRPC:
             parts.append(match.map_name)
 
         # Show score with player's team first
-        if match.player_team == 1:
-            score = f"{match.team1_score} - {match.team2_score}"
-        else:
-            score = f"{match.team2_score} - {match.team1_score}"
-        parts.append(score)
+        if show_score:
+            if match.player_team == 1:
+                score = f"{match.team1_score} - {match.team2_score}"
+            else:
+                score = f"{match.team2_score} - {match.team1_score}"
+            parts.append(score)
 
         details = " | ".join(parts) if parts else "In Match"
 
@@ -170,6 +173,7 @@ class DiscordRPC:
         match: MatchInfo,
         elo_change: Optional[int] = None,
         show_elo: bool = True,
+        show_score: bool = True,
     ) -> None:
         """Update presence for finished match state.
 
@@ -177,6 +181,7 @@ class DiscordRPC:
             match: Match information
             elo_change: ELO gained/lost
             show_elo: Whether to show ELO change
+            show_score: Whether to show final score
         """
         # Determine win/loss
         if match.player_team == 1:
@@ -190,12 +195,14 @@ class DiscordRPC:
         details = f"Match Finished - {result}"
 
         # Build state
-        state_parts = [score]
+        state_parts = []
+        if show_score:
+            state_parts.append(score)
         if show_elo and elo_change is not None:
             sign = "+" if elo_change >= 0 else ""
             state_parts.append(f"ELO: {sign}{elo_change}")
 
-        state = " | ".join(state_parts)
+        state = " | ".join(state_parts) if state_parts else "Match Complete"
 
         self._update(
             details=details,
