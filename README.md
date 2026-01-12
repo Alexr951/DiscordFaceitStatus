@@ -12,12 +12,6 @@ Display your Faceit CS2 match information in your Discord status.
 - Runs silently in system tray
 - Privacy options to hide specific information
 
-## Requirements
-
-- Python 3.10+
-- Discord desktop app running
-- Faceit account with API access
-
 ## Installation
 
 1. Clone the repository:
@@ -49,15 +43,6 @@ Display your Faceit CS2 match information in your Discord status.
 2. Sign in with your Faceit account
 3. Create a new application or use an existing one
 4. Copy your API key (Client-side API key)
-
-### Creating a Discord Application
-
-1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
-2. Click "New Application" and give it a name (e.g., "Faceit Status")
-3. Copy the "Application ID" from the General Information page
-4. (Optional) Under "Rich Presence" > "Art Assets", upload images:
-   - `faceit_logo` - Main Faceit logo (large image)
-   - `map_mirage`, `map_inferno`, etc. - Map images (small image)
 
 ### Environment Variables
 
@@ -111,26 +96,6 @@ Right-click the tray icon for options:
 - **View Current Match** - Open match page in browser
 - **Exit** - Close the application
 
-## Discord Status Examples
-
-**In Lobby:**
-```
-In Lobby - de_mirage
-Avg ELO: 2,150
-```
-
-**Live Match:**
-```
-de_mirage | 8 - 5
-K/D/A: 15/8/3 | Avg ELO: 2,150
-```
-
-**Match Finished:**
-```
-Match Finished - Victory
-12 - 8 | ELO: +25
-```
-
 ## Troubleshooting
 
 ### "Discord not found" error
@@ -146,31 +111,6 @@ Check that your Faceit API key is correct in `.env`.
 
 ### Rate limit errors
 The app respects Faceit API rate limits. If you see these errors, the app will automatically retry after a delay.
-
-## Project Structure
-
-```
-DiscordFaceitStatus/
-├── src/
-│   ├── __init__.py      # Package init
-│   ├── main.py          # Entry point
-│   ├── config.py        # Configuration management
-│   ├── faceit_api.py    # Faceit API client
-│   ├── discord_rpc.py   # Discord Rich Presence
-│   ├── monitor.py       # Main monitoring loop
-│   ├── tray.py          # System tray integration
-│   └── utils.py         # Helper functions
-├── assets/
-│   └── icon.ico         # Tray icon
-├── scripts/
-│   └── generate_icon.py # Icon generator
-├── .env                 # Your credentials (git-ignored)
-├── .env.example         # Credential template
-├── config.json          # User settings (git-ignored)
-├── requirements.txt     # Python dependencies
-├── run.py               # Run script
-└── README.md
-```
 
 ## License
 
