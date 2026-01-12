@@ -13,12 +13,21 @@ class Config:
 
     DEFAULT_SETTINGS = {
         "poll_interval": 45,  # seconds
-        "show_elo": True,
-        "show_avg_elo": True,
-        "show_kda": True,
+        "enabled": True,
+
+        # Match display settings
         "show_map": True,
         "show_score": True,
-        "enabled": True,
+        "show_elo": True,  # ELO at stake per match
+        "show_avg_elo": True,
+        "show_kda": True,
+
+        # Player statistics settings
+        "show_current_elo": True,
+        "show_country": True,
+        "show_region_rank": True,
+        "show_today_elo": True,
+        "show_fpl": True,
     }
 
     def __init__(self):

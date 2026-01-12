@@ -110,12 +110,12 @@ class SystemTray:
         Returns:
             pystray Menu object
         """
-        # Display settings submenu
-        display_settings = Menu(
+        # Match display settings submenu
+        match_settings = Menu(
             MenuItem(
-                "Show Average ELO",
-                self._toggle_setting("show_avg_elo"),
-                checked=lambda item: self._get_setting("show_avg_elo"),
+                "Show Map Name",
+                self._toggle_setting("show_map"),
+                checked=lambda item: self._get_setting("show_map"),
             ),
             MenuItem(
                 "Show Round Score",
@@ -123,19 +123,48 @@ class SystemTray:
                 checked=lambda item: self._get_setting("show_score"),
             ),
             MenuItem(
-                "Show K/D/A Stats",
-                self._toggle_setting("show_kda"),
-                checked=lambda item: self._get_setting("show_kda"),
-            ),
-            MenuItem(
-                "Show ELO Change",
+                "Show ELO at Stake",
                 self._toggle_setting("show_elo"),
                 checked=lambda item: self._get_setting("show_elo"),
             ),
             MenuItem(
-                "Show Map Name",
-                self._toggle_setting("show_map"),
-                checked=lambda item: self._get_setting("show_map"),
+                "Show Average ELO",
+                self._toggle_setting("show_avg_elo"),
+                checked=lambda item: self._get_setting("show_avg_elo"),
+            ),
+            MenuItem(
+                "Show K/D/A Stats",
+                self._toggle_setting("show_kda"),
+                checked=lambda item: self._get_setting("show_kda"),
+            ),
+        )
+
+        # Player statistics settings submenu
+        player_settings = Menu(
+            MenuItem(
+                "Show Current ELO",
+                self._toggle_setting("show_current_elo"),
+                checked=lambda item: self._get_setting("show_current_elo"),
+            ),
+            MenuItem(
+                "Show Country",
+                self._toggle_setting("show_country"),
+                checked=lambda item: self._get_setting("show_country"),
+            ),
+            MenuItem(
+                "Show Regional Rank",
+                self._toggle_setting("show_region_rank"),
+                checked=lambda item: self._get_setting("show_region_rank"),
+            ),
+            MenuItem(
+                "Show Today's ELO Change",
+                self._toggle_setting("show_today_elo"),
+                checked=lambda item: self._get_setting("show_today_elo"),
+            ),
+            MenuItem(
+                "Show FPL/FPL-C Status",
+                self._toggle_setting("show_fpl"),
+                checked=lambda item: self._get_setting("show_fpl"),
             ),
         )
 
@@ -152,8 +181,12 @@ class SystemTray:
                 checked=lambda item: self._enabled,
             ),
             MenuItem(
-                "Display Settings",
-                display_settings,
+                "Match Display",
+                match_settings,
+            ),
+            MenuItem(
+                "Player Statistics",
+                player_settings,
             ),
             Menu.SEPARATOR,
             MenuItem(

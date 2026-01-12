@@ -101,10 +101,10 @@ class DiscordRPC:
         self._update(
             details=details,
             state=state,
-            large_image="faceit_logo",
-            large_text="Faceit CS2",
-            small_image=self._get_map_image(match.map_name),
-            small_text=match.map_name,
+            large_image=self._get_map_image(match.map_name),
+            large_text=match.map_name if match.map_name != "Unknown" else "Faceit CS2",
+            small_image="faceit_logo",
+            small_text="Faceit CS2",
             buttons=[{"label": "View Match", "url": match.match_url}] if match.match_url else None,
         )
 
@@ -160,10 +160,10 @@ class DiscordRPC:
         self._update(
             details=details,
             state=state,
-            large_image="faceit_logo",
-            large_text="Faceit CS2",
-            small_image=self._get_map_image(match.map_name),
-            small_text=match.map_name,
+            large_image=self._get_map_image(match.map_name),
+            large_text=match.map_name if match.map_name != "Unknown" else "Faceit CS2",
+            small_image="faceit_logo",
+            small_text="Faceit CS2",
             start=start_time,
             buttons=[{"label": "View Match", "url": match.match_url}] if match.match_url else None,
         )
@@ -207,11 +207,92 @@ class DiscordRPC:
         self._update(
             details=details,
             state=state,
-            large_image="faceit_logo",
-            large_text="Faceit CS2",
-            small_image=self._get_map_image(match.map_name),
-            small_text=match.map_name,
+            large_image=self._get_map_image(match.map_name),
+            large_text=match.map_name if match.map_name != "Unknown" else "Faceit CS2",
+            small_image="faceit_logo",
+            small_text="Faceit CS2",
             buttons=[{"label": "View Match", "url": match.match_url}] if match.match_url else None,
+        )
+
+    def update_live_simple(
+        self,
+        map_name: Optional[str] = None,
+        score: Optional[str] = None,
+        elo_at_stake: Optional[str] = None,
+        server: Optional[str] = None,
+        queue_name: Optional[str] = None,
+        current_elo: Optional[int] = None,
+        country_flag: Optional[str] = None,
+        region_rank: Optional[int] = None,
+        today_elo: Optional[str] = None,
+        fpl_status: Optional[str] = None,
+        show_elo: bool = True,
+        show_score: bool = True,
+        show_current_elo: bool = True,
+        show_country: bool = True,
+        show_region_rank: bool = True,
+        show_today_elo: bool = True,
+        show_fpl: bool = True,
+    ) -> None:
+        """Update presence for live match using data from third-party API.
+
+        Args:
+            map_name: Map name (e.g., "Dust II")
+            score: Score string (e.g., "5:3")
+            elo_at_stake: ELO at stake (e.g., "+25/-25")
+            server: Server location (e.g., "Chicago")
+            queue_name: Queue name (e.g., "North America 5V5 Queue")
+            current_elo: Player's current ELO
+            country_flag: Country flag emoji
+            region_rank: Regional ranking position
+            today_elo: Today's ELO change (e.g., "+45" or "-23")
+            fpl_status: FPL/FPL-C status text
+            show_*: Toggle flags for each statistic
+        """
+        # Build details line: "Dust II | 5:3" or with ELO "Dust II | 5:3 | ELO: 2,880"
+        details_parts = []
+        if map_name:
+            details_parts.append(map_name)
+        if show_score and score:
+            details_parts.append(score)
+        if show_current_elo and current_elo:
+            details_parts.append(f"ELO: {current_elo:,}")
+        details = " | ".join(details_parts) if details_parts else "In Match"
+
+        # Build state line: "🇨🇦 Rank #674 | +45 today | Chicago"
+        state_parts = []
+        if show_country and country_flag:
+            if show_region_rank and region_rank:
+                state_parts.append(f"{country_flag} Rank #{region_rank}")
+            else:
+                state_parts.append(country_flag)
+        elif show_region_rank and region_rank:
+            state_parts.append(f"Rank #{region_rank}")
+
+        if show_today_elo and today_elo:
+            state_parts.append(f"{today_elo} today")
+
+        if show_elo and elo_at_stake:
+            state_parts.append(f"±{elo_at_stake.replace('+', '').replace('-', '').split('/')[0]}")
+
+        if server:
+            state_parts.append(server)
+
+        state = " | ".join(state_parts) if state_parts else "Playing"
+
+        # Build large text with FPL status if applicable
+        large_text = map_name or "Faceit CS2"
+        if show_fpl and fpl_status and "participate" not in fpl_status.lower():
+            large_text = f"{map_name} | {fpl_status}"
+
+        self._update(
+            details=details,
+            state=state,
+            large_image=self._get_map_image(map_name or ""),
+            large_text=large_text,
+            small_image="faceit_logo",
+            small_text=queue_name or "Faceit CS2",
+            start=int(time.time()),
         )
 
     def _update(
@@ -279,21 +360,31 @@ class DiscordRPC:
         Note: These image keys need to be uploaded to your Discord app.
 
         Args:
-            map_name: Map name (e.g., "de_mirage")
+            map_name: Map name (e.g., "de_mirage" or "Mirage")
 
         Returns:
             Image key for Discord
         """
         # Map names to image keys (you'll need to upload these to Discord)
+        # Supports both official names (de_mirage) and display names (Mirage, Dust II)
         map_images = {
             "de_mirage": "map_mirage",
+            "mirage": "map_mirage",
             "de_inferno": "map_inferno",
+            "inferno": "map_inferno",
             "de_dust2": "map_dust2",
+            "dust2": "map_dust2",
+            "dust ii": "map_dust2",
             "de_nuke": "map_nuke",
+            "nuke": "map_nuke",
             "de_overpass": "map_overpass",
+            "overpass": "map_overpass",
             "de_ancient": "map_ancient",
+            "ancient": "map_ancient",
             "de_anubis": "map_anubis",
+            "anubis": "map_anubis",
             "de_vertigo": "map_vertigo",
+            "vertigo": "map_vertigo",
         }
 
         return map_images.get(map_name.lower(), "faceit_logo")

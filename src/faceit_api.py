@@ -9,8 +9,10 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-# Faceit API base URL
+# Faceit API base URLs
 BASE_URL = "https://open.faceit.com/data/v4"
+MATCH_HISTORY_URL = "https://api.faceit.com/match-history/v5"
+THIRD_PARTY_API_URL = "https://faceit.lcrypt.eu"
 
 # CS2 game ID on Faceit
 CS2_GAME_ID = "cs2"
@@ -56,6 +58,52 @@ class MatchInfo:
     players: list[MatchPlayer]
     player_team: int  # 1 or 2
     elo_change: Optional[int] = None  # ELO gained/lost after match
+
+
+@dataclass
+class LiveMatchInfo:
+    """Live match information from third-party API."""
+
+    # Match state
+    is_live: bool
+    map_name: str
+    score_team1: int
+    score_team2: int
+    elo_at_stake: str  # e.g., "+25/-25"
+    server: str
+    queue_name: str
+    win_chance: int
+    duration: str
+    current_round: int
+
+    # Player statistics
+    current_elo: int
+    skill_level: str
+    region: str
+    country: str
+    country_flag: str
+    region_ranking: int
+    country_ranking: int
+
+    # Ladder info
+    ladder_position: int
+    ladder_division: str
+    ladder_points: int
+    ladder_win_rate: float
+
+    # Today's stats
+    today_elo_change: str  # e.g., "-56" or "+45"
+    today_wins: int
+    today_losses: int
+    today_matches: int
+
+    # FPL status
+    fpl_status: str
+    fplc_status: str
+
+    # Recent performance
+    trend: str  # e.g., "WWLLL"
+    last_match: str
 
 
 class FaceitAPIError(Exception):
@@ -178,6 +226,98 @@ class FaceitAPI:
             avatar_url=data.get("avatar", ""),
         )
 
+    def get_live_match_info(self, nickname: str) -> Optional[LiveMatchInfo]:
+        """Get live match info from third-party API.
+
+        Args:
+            nickname: Faceit nickname
+
+        Returns:
+            LiveMatchInfo if in live match, None otherwise
+        """
+        try:
+            self._rate_limit()
+            url = f"{THIRD_PARTY_API_URL}/?n={nickname}"
+            response = requests.get(url, timeout=10)
+
+            if response.status_code != 200:
+                logger.debug(f"[third-party] API returned status {response.status_code}")
+                return None
+
+            data = response.json()
+
+            if data.get("error"):
+                logger.debug(f"[third-party] API returned error")
+                return None
+
+            current = data.get("current", {})
+            if not current.get("present") or current.get("status") != "LIVE":
+                logger.debug(f"[third-party] Player not in live match")
+                return None
+
+            # Parse score (format: "2:5")
+            score_str = current.get("score", "0:0")
+            try:
+                score_parts = score_str.split(":")
+                score_team1 = int(score_parts[0])
+                score_team2 = int(score_parts[1])
+            except (ValueError, IndexError):
+                score_team1, score_team2 = 0, 0
+
+            # Parse ladder info
+            ladder = data.get("detail", {}).get("ladder", {})
+            today = data.get("today", {})
+
+            live_info = LiveMatchInfo(
+                # Match state
+                is_live=True,
+                map_name=current.get("map", "Unknown"),
+                score_team1=score_team1,
+                score_team2=score_team2,
+                elo_at_stake=current.get("elo", ""),
+                server=current.get("server", ""),
+                queue_name=current.get("what", ""),
+                win_chance=current.get("chance", 50),
+                duration=current.get("duration", ""),
+                current_round=current.get("round", 0),
+
+                # Player statistics
+                current_elo=data.get("elo", 0),
+                skill_level=str(data.get("level", "")),
+                region=data.get("region", ""),
+                country=data.get("country", ""),
+                country_flag=data.get("country_flag", ""),
+                region_ranking=data.get("region_ranking", 0),
+                country_ranking=data.get("country_ranking", 0),
+
+                # Ladder info
+                ladder_position=ladder.get("position", 0),
+                ladder_division=ladder.get("division", ""),
+                ladder_points=ladder.get("points", 0),
+                ladder_win_rate=ladder.get("win_rate", 0.0),
+
+                # Today's stats
+                today_elo_change=today.get("elo", "0") if today.get("present") else "0",
+                today_wins=today.get("win", 0) if today.get("present") else 0,
+                today_losses=today.get("lose", 0) if today.get("present") else 0,
+                today_matches=today.get("count", 0) if today.get("present") else 0,
+
+                # FPL status
+                fpl_status=data.get("fpl", ""),
+                fplc_status=data.get("fplc", ""),
+
+                # Recent performance
+                trend=data.get("trend", ""),
+                last_match=data.get("last_match", ""),
+            )
+
+            logger.debug(f"[third-party] Found live match: {live_info.map_name} ({score_team1}:{score_team2})")
+            return live_info
+
+        except Exception as e:
+            logger.debug(f"[third-party] Error: {e}")
+            return None
+
     def get_ongoing_match(self, player_id: str) -> Optional[str]:
         """Check if player is in an ongoing match.
 
@@ -188,14 +328,26 @@ class FaceitAPI:
             Match ID if in match, None otherwise
         """
         try:
+            # First, check if player endpoint has active_match info
             data = self._request(f"/players/{player_id}")
 
-            # Check for infractions/bans that might affect status
-            if data.get("membership_type") == "free":
-                pass  # Normal user
+            # Log all top-level keys to see what's available
+            logger.debug(f"Player endpoint keys: {list(data.keys())}")
 
-            # The API may include ongoing_match info in some cases
-            # Check player's recent matches for ongoing ones
+            # Check for various possible ongoing match fields
+            if "active_match_id" in data:
+                logger.debug(f"Found active_match_id: {data['active_match_id']}")
+                return data["active_match_id"]
+
+            if "ongoing_match" in data:
+                logger.debug(f"Found ongoing_match: {data['ongoing_match']}")
+                return data["ongoing_match"].get("match_id") if isinstance(data["ongoing_match"], dict) else data["ongoing_match"]
+
+            if "current_match" in data:
+                logger.debug(f"Found current_match: {data['current_match']}")
+                return data["current_match"]
+
+            # Fallback: Check player's recent matches for ongoing ones
             return self._check_recent_matches_for_ongoing(player_id)
 
         except FaceitAPIError as e:
@@ -211,20 +363,75 @@ class FaceitAPI:
         Returns:
             Match ID if found, None otherwise
         """
+        # Try v5 match history API first (may include ongoing matches)
+        match_id = self._check_v5_match_history(player_id)
+        if match_id:
+            return match_id
+
+        # Fallback to v4 API
         try:
             data = self._request(
                 f"/players/{player_id}/history",
                 {"game": CS2_GAME_ID, "limit": 5}
             )
 
-            for match in data.get("items", []):
-                status = match.get("status", "")
-                if status in ("READY", "ONGOING", "VOTING", "CONFIGURING"):
-                    return match.get("match_id")
+            items = data.get("items", [])
+            logger.debug(f"[v4] Found {len(items)} recent matches")
 
+            for match in items:
+                status = match.get("status", "")
+                match_id = match.get("match_id", "")
+                logger.debug(f"[v4] Match {match_id}: status={status}")
+                if status.upper() in ("READY", "ONGOING", "VOTING", "CONFIGURING"):
+                    logger.debug(f"[v4] Found active match: {match_id}")
+                    return match_id
+
+            logger.debug("[v4] No active match found in recent history")
             return None
 
-        except FaceitAPIError:
+        except FaceitAPIError as e:
+            logger.debug(f"[v4] Error checking recent matches: {e}")
+            return None
+
+    def _check_v5_match_history(self, player_id: str) -> Optional[str]:
+        """Check v5 match history API for ongoing matches.
+
+        Args:
+            player_id: Faceit player ID
+
+        Returns:
+            Match ID if found, None otherwise
+        """
+        try:
+            self._rate_limit()
+            url = f"{MATCH_HISTORY_URL}/players/{player_id}/history"
+            response = self.session.get(
+                url,
+                params={"page": 0, "size": 10},
+                timeout=10
+            )
+
+            if response.status_code != 200:
+                logger.debug(f"[v5] API returned status {response.status_code}")
+                return None
+
+            data = response.json()
+            matches = data.get("payload", [])
+            logger.debug(f"[v5] Found {len(matches)} recent matches")
+
+            for match in matches:
+                status = match.get("status", "")
+                match_id = match.get("matchId", "") or match.get("match_id", "")
+                logger.debug(f"[v5] Match {match_id}: status={status}")
+                if status.upper() in ("READY", "ONGOING", "VOTING", "CONFIGURING", "LIVE"):
+                    logger.debug(f"[v5] Found active match: {match_id}")
+                    return match_id
+
+            logger.debug("[v5] No active match found")
+            return None
+
+        except Exception as e:
+            logger.debug(f"[v5] Error: {e}")
             return None
 
     def get_match_details(self, match_id: str, player_id: str) -> MatchInfo:

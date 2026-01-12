@@ -7,7 +7,7 @@ from typing import Callable, Optional
 
 from .config import Config
 from .discord_rpc import DiscordRPC
-from .faceit_api import FaceitAPI, FaceitAPIError, MatchInfo
+from .faceit_api import FaceitAPI, FaceitAPIError, MatchInfo, LiveMatchInfo
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +23,10 @@ class MatchMonitor:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._player_id: Optional[str] = None
+        self._player_nickname: str = config.faceit_nickname
         self._current_match_id: Optional[str] = None
         self._last_match_status: Optional[str] = None
+        self._in_live_match: bool = False
 
         # Callbacks for UI updates
         self._on_status_change: Optional[Callable[[str], None]] = None
@@ -172,7 +174,22 @@ class MatchMonitor:
         if not self._player_id:
             return
 
-        # Look for ongoing match
+        # First, check for live match using third-party API (more reliable for live detection)
+        live_info = self.faceit.get_live_match_info(self._player_nickname)
+
+        if live_info and live_info.is_live:
+            # We have a live match from third-party API
+            if not self._in_live_match:
+                logger.info(f"Live match detected: {live_info.map_name}")
+                self._in_live_match = True
+
+            self._update_live_presence(live_info)
+            return
+
+        # No live match from third-party API, check official API for other match states
+        self._in_live_match = False
+
+        # Look for ongoing match via official API
         match_id = self.faceit.get_ongoing_match(self._player_id)
 
         if not match_id:
@@ -201,6 +218,52 @@ class MatchMonitor:
 
         # Update Discord based on match status
         self._update_presence(match)
+
+    def _update_live_presence(self, live_info: LiveMatchInfo) -> None:
+        """Update Discord presence for live match from third-party API.
+
+        Args:
+            live_info: Live match information
+        """
+        # Get all display settings
+        show_map = self.config.get("show_map", True)
+        show_score = self.config.get("show_score", True)
+        show_elo = self.config.get("show_elo", True)
+        show_current_elo = self.config.get("show_current_elo", True)
+        show_country = self.config.get("show_country", True)
+        show_region_rank = self.config.get("show_region_rank", True)
+        show_today_elo = self.config.get("show_today_elo", True)
+        show_fpl = self.config.get("show_fpl", True)
+
+        score = f"{live_info.score_team1}:{live_info.score_team2}"
+        self._notify_status(f"Live: {live_info.map_name} ({score})")
+
+        # Determine FPL status to display
+        fpl_status = None
+        if "participate" not in live_info.fpl_status.lower():
+            fpl_status = "FPL"
+        elif "participate" not in live_info.fplc_status.lower():
+            fpl_status = "FPL-C"
+
+        self.discord.update_live_simple(
+            map_name=live_info.map_name if show_map else None,
+            score=score if show_score else None,
+            elo_at_stake=live_info.elo_at_stake if show_elo else None,
+            server=live_info.server,
+            queue_name=live_info.queue_name,
+            current_elo=live_info.current_elo if show_current_elo else None,
+            country_flag=live_info.country_flag if show_country else None,
+            region_rank=live_info.region_ranking if show_region_rank else None,
+            today_elo=live_info.today_elo_change if show_today_elo else None,
+            fpl_status=fpl_status if show_fpl else None,
+            show_elo=show_elo,
+            show_score=show_score,
+            show_current_elo=show_current_elo,
+            show_country=show_country,
+            show_region_rank=show_region_rank,
+            show_today_elo=show_today_elo,
+            show_fpl=show_fpl,
+        )
 
     def _update_presence(self, match: MatchInfo) -> None:
         """Update Discord presence based on match state.
