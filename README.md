@@ -11,8 +11,20 @@ Display your Faceit CS2 match information in your Discord status.
 - Clickable link to view match on Faceit
 - Runs silently in system tray
 - Privacy options to hide specific information
+- Change FACEIT username directly from the tray menu
+- Multi-select stats configuration dialog
+- Standalone executable option (no Python required)
 
 ## Installation
+
+### Option 1: Standalone Executable (Recommended for most users)
+
+1. Download the latest release from the [Releases](https://github.com/yourusername/DiscordFaceitStatus/releases) page
+2. Extract the files to a folder of your choice
+3. Copy `.env.example` to `.env` and fill in your credentials
+4. Run `FaceitDiscordStatus.exe`
+
+### Option 2: From Source
 
 1. Clone the repository:
    ```bash
@@ -92,9 +104,31 @@ The application will:
 
 Right-click the tray icon for options:
 - **Status** - Shows current monitoring status
-- **Enable/Disable Rich Presence** - Toggle the Discord status
+- **Tracking** - Shows which FACEIT user is being tracked
+- **Enable/Disable Tracking** - Toggle the Discord status
+- **Match Display** - Submenu to toggle match-related display options
+- **Player Statistics** - Submenu to toggle player stat display options
+- **Change FACEIT Username** - Change the tracked user without editing files
+- **Configure Stats** - Multi-select dialog to configure all display options at once
 - **View Current Match** - Open match page in browser
 - **Exit** - Close the application
+
+### Changing FACEIT Username
+
+You can change the tracked FACEIT username directly from the tray menu:
+1. Right-click the tray icon
+2. Click "Change FACEIT Username..."
+3. Enter the new username in the dialog
+4. Click "Save"
+5. Choose to restart the application when prompted
+
+### Configuring Display Stats
+
+To configure multiple display options at once:
+1. Right-click the tray icon
+2. Click "Configure Stats..."
+3. Check/uncheck the options you want
+4. Click "Save" to apply all changes
 
 ## Troubleshooting
 
@@ -111,6 +145,51 @@ Check that your Faceit API key is correct in `.env`.
 
 ### Rate limit errors
 The app respects Faceit API rate limits. If you see these errors, the app will automatically retry after a delay.
+
+## Building the Executable
+
+To create a standalone executable from source:
+
+### Prerequisites
+- Python 3.8 or higher
+- pip (Python package manager)
+
+### Build Steps
+
+**Windows:**
+1. Open a command prompt in the project directory
+2. Run the build script:
+   ```cmd
+   build.bat
+   ```
+3. The executable will be created in the `dist` folder
+
+**Manual Build (all platforms):**
+1. Install PyInstaller:
+   ```bash
+   pip install pyinstaller
+   ```
+2. Install project dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Build using the spec file:
+   ```bash
+   pyinstaller FaceitDiscordStatus.spec --clean
+   ```
+4. The executable will be in the `dist` folder
+
+### Distribution
+
+After building, the `dist` folder will contain:
+- `FaceitDiscordStatus.exe` - The standalone executable
+- `.env.example` - Template for configuration
+- `README.txt` - Setup instructions for end users
+
+To distribute:
+1. Copy the contents of the `dist` folder
+2. Users must create a `.env` file from the `.env.example` template
+3. The `config.json` and `logs` folder will be created automatically
 
 ## License
 

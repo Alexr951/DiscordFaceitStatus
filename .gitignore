@@ -17,7 +17,9 @@ pip-delete-this-directory.txt
 # PyInstaller
 dist/
 build/
-*.spec
+
+# Claude Code temp files
+tmpclaude-*
 
 # User config (generated at runtime)
 config.json
