@@ -7,17 +7,48 @@ echo  Faceit Discord Status - Build Script
 echo ========================================
 echo.
 
-REM Check if Python is installed
+REM Check if Python is installed, including common Anaconda paths
+set PYTHON_CMD=python
+
+REM Try default python first
 python --version >nul 2>&1
-if errorlevel 1 (
-    echo ERROR: Python is not installed or not in PATH.
-    echo Please install Python 3.8+ from https://python.org
-    pause
-    exit /b 1
+if not errorlevel 1 goto :python_found
+
+REM Try common Anaconda locations
+set ANACONDA_PATHS=^
+%USERPROFILE%\anaconda3;^
+%USERPROFILE%\Anaconda3;^
+%USERPROFILE%\miniconda3;^
+%USERPROFILE%\Miniconda3;^
+D:\Users\%USERNAME%\anaconda3;^
+D:\Users\%USERNAME%\Anaconda3;^
+C:\ProgramData\Anaconda3;^
+C:\ProgramData\miniconda3
+
+for %%p in (%ANACONDA_PATHS%) do (
+    if exist "%%p\python.exe" (
+        echo Found Anaconda Python at: %%p
+        set "PATH=%%p;%%p\Scripts;%%p\Library\bin;%PATH%"
+        set "PYTHON_CMD=%%p\python.exe"
+        goto :python_found
+    )
 )
 
+echo ERROR: Python is not installed or not in PATH.
+echo.
+echo If you're using Anaconda, you can either:
+echo   1. Run this from Anaconda Prompt
+echo   2. Add Anaconda to your PATH manually
+echo.
+pause
+exit /b 1
+
+:python_found
+echo Using Python: %PYTHON_CMD%
+%PYTHON_CMD% --version
+
 REM Check if pip is available
-pip --version >nul 2>&1
+%PYTHON_CMD% -m pip --version >nul 2>&1
 if errorlevel 1 (
     echo ERROR: pip is not available.
     echo Please ensure pip is installed with Python.
@@ -26,8 +57,9 @@ if errorlevel 1 (
 )
 
 REM Install/upgrade PyInstaller
+echo.
 echo Installing/upgrading PyInstaller...
-pip install --upgrade pyinstaller
+%PYTHON_CMD% -m pip install --upgrade pyinstaller
 if errorlevel 1 (
     echo ERROR: Failed to install PyInstaller.
     pause
@@ -37,7 +69,7 @@ if errorlevel 1 (
 REM Install project dependencies
 echo.
 echo Installing project dependencies...
-pip install -r requirements.txt
+%PYTHON_CMD% -m pip install -r requirements.txt
 if errorlevel 1 (
     echo ERROR: Failed to install dependencies.
     pause
@@ -53,7 +85,7 @@ if exist "build" rmdir /s /q "build"
 REM Build the executable
 echo.
 echo Building executable...
-pyinstaller FaceitDiscordStatus.spec --clean
+%PYTHON_CMD% -m PyInstaller FaceitDiscordStatus.spec --clean
 if errorlevel 1 (
     echo ERROR: Build failed.
     pause
