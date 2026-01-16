@@ -2,7 +2,9 @@
 
 import logging
 import os
+import subprocess
 import sys
+import tempfile
 import threading
 import webbrowser
 from pathlib import Path
@@ -18,171 +20,215 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _get_tk_root():
-    """Get or create a hidden tkinter root window."""
-    import tkinter as tk
-    root = tk.Tk()
-    root.withdraw()
-    # Ensure the window appears on top
-    root.attributes('-topmost', True)
-    root.update()
-    return root
+def _windows_input_box(title: str, prompt: str, default: str = "") -> Optional[str]:
+    """Show a Windows input dialog using VBScript.
+
+    Args:
+        title: Dialog title
+        prompt: Prompt text
+        default: Default value
+
+    Returns:
+        User input or None if cancelled
+    """
+    # Create VBScript for input box
+    vbs_script = f'''
+Dim result
+result = InputBox("{prompt}", "{title}", "{default}")
+If result = "" And Not IsEmpty(result) Then
+    WScript.Echo ""
+ElseIf IsEmpty(result) Then
+    WScript.Echo "::CANCELLED::"
+Else
+    WScript.Echo result
+End If
+'''
+
+    try:
+        # Write script to temp file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.vbs', delete=False) as f:
+            f.write(vbs_script)
+            vbs_path = f.name
+
+        # Run the script
+        result = subprocess.run(
+            ['cscript', '//Nologo', vbs_path],
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        )
+
+        # Clean up
+        os.unlink(vbs_path)
+
+        output = result.stdout.strip()
+        if output == "::CANCELLED::":
+            return None
+        return output
+
+    except Exception as e:
+        logger.error(f"Failed to show input dialog: {e}")
+        return None
 
 
-class UsernameDialog:
-    """Dialog for changing the FACEIT username."""
+def _windows_message_box(title: str, message: str, buttons: int = 0) -> int:
+    """Show a Windows message box using VBScript.
 
-    def __init__(self, parent, current_username: str = ""):
-        import tkinter as tk
-        from tkinter import ttk
+    Args:
+        title: Dialog title
+        message: Message text
+        buttons: Button type (0=OK, 1=OK/Cancel, 4=Yes/No)
 
-        self.result = None
-        self.dialog = tk.Toplevel(parent)
-        self.dialog.title("Change FACEIT Username")
-        self.dialog.geometry("400x150")
-        self.dialog.resizable(False, False)
-        self.dialog.transient(parent)
-        self.dialog.grab_set()
+    Returns:
+        Button clicked (1=OK, 2=Cancel, 6=Yes, 7=No)
+    """
+    # Escape quotes in message
+    message = message.replace('"', '""').replace('\n', '" & vbCrLf & "')
 
-        # Center on screen
-        self.dialog.update_idletasks()
-        x = (self.dialog.winfo_screenwidth() - 400) // 2
-        y = (self.dialog.winfo_screenheight() - 150) // 2
-        self.dialog.geometry(f"+{x}+{y}")
+    vbs_script = f'''
+Dim result
+result = MsgBox("{message}", {buttons}, "{title}")
+WScript.Echo result
+'''
 
-        # Make dialog appear on top
-        self.dialog.attributes('-topmost', True)
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.vbs', delete=False) as f:
+            f.write(vbs_script)
+            vbs_path = f.name
 
-        # Main frame with padding
-        frame = ttk.Frame(self.dialog, padding=20)
-        frame.pack(fill=tk.BOTH, expand=True)
+        result = subprocess.run(
+            ['cscript', '//Nologo', vbs_path],
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        )
 
-        # Label
-        ttk.Label(frame, text="Enter new FACEIT username:").pack(anchor=tk.W)
+        os.unlink(vbs_path)
+        return int(result.stdout.strip())
 
-        # Entry field
-        self.entry = ttk.Entry(frame, width=40)
-        self.entry.insert(0, current_username)
-        self.entry.pack(fill=tk.X, pady=(5, 15))
-        self.entry.select_range(0, tk.END)
-        self.entry.focus_set()
-
-        # Buttons frame
-        btn_frame = ttk.Frame(frame)
-        btn_frame.pack(fill=tk.X)
-
-        ttk.Button(btn_frame, text="Cancel", command=self._cancel).pack(side=tk.RIGHT, padx=(5, 0))
-        ttk.Button(btn_frame, text="Save", command=self._save).pack(side=tk.RIGHT)
-
-        # Bind Enter key
-        self.entry.bind('<Return>', lambda e: self._save())
-        self.dialog.bind('<Escape>', lambda e: self._cancel())
-
-        # Wait for dialog to close
-        self.dialog.wait_window()
-
-    def _save(self):
-        self.result = self.entry.get().strip()
-        self.dialog.destroy()
-
-    def _cancel(self):
-        self.result = None
-        self.dialog.destroy()
+    except Exception as e:
+        logger.error(f"Failed to show message box: {e}")
+        return 0
 
 
-class StatsConfigDialog:
-    """Multi-select dialog for configuring display stats."""
+def _windows_checkbox_dialog(title: str, settings: list, config: "Config") -> Optional[dict]:
+    """Show a Windows checkbox dialog using PowerShell/WPF.
 
-    MATCH_SETTINGS = [
-        ("show_map", "Show Map Name"),
-        ("show_score", "Show Round Score"),
-        ("show_elo", "Show ELO at Stake"),
-        ("show_avg_elo", "Show Average ELO"),
-        ("show_kda", "Show K/D/A Stats"),
-    ]
+    Args:
+        title: Dialog title
+        settings: List of (key, label) tuples
+        config: Config object to get current values
 
-    PLAYER_SETTINGS = [
-        ("show_current_elo", "Show Current ELO"),
-        ("show_country", "Show Country"),
-        ("show_region_rank", "Show Regional Rank"),
-        ("show_today_elo", "Show Today's ELO Change"),
-        ("show_fpl", "Show FPL/FPL-C Status"),
-    ]
+    Returns:
+        Dictionary of {key: bool} or None if cancelled
+    """
+    # Build checkbox definitions
+    checkbox_defs = []
+    for key, label in settings:
+        checked = "True" if config.get(key, True) else "False"
+        checkbox_defs.append(f'@{{Key="{key}"; Label="{label}"; Checked=${checked}}}')
 
-    def __init__(self, parent, config: "Config"):
-        import tkinter as tk
-        from tkinter import ttk
+    checkboxes_array = ",".join(checkbox_defs)
 
-        self.result = None
-        self.config = config
-        self.vars = {}
+    ps_script = f'''
+Add-Type -AssemblyName PresentationFramework
+Add-Type -AssemblyName PresentationCore
+Add-Type -AssemblyName WindowsBase
 
-        self.dialog = tk.Toplevel(parent)
-        self.dialog.title("Configure Display Stats")
-        self.dialog.geometry("350x420")
-        self.dialog.resizable(False, False)
-        self.dialog.transient(parent)
-        self.dialog.grab_set()
+$settings = @({checkboxes_array})
 
-        # Center on screen
-        self.dialog.update_idletasks()
-        x = (self.dialog.winfo_screenwidth() - 350) // 2
-        y = (self.dialog.winfo_screenheight() - 420) // 2
-        self.dialog.geometry(f"+{x}+{y}")
+[xml]$xaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        Title="{title}" Height="450" Width="380" WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize" Topmost="True">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
 
-        # Make dialog appear on top
-        self.dialog.attributes('-topmost', True)
+        <TextBlock Grid.Row="0" Text="Select display options:" FontWeight="Bold" Margin="0,0,0,10"/>
 
-        # Main frame with padding
-        frame = ttk.Frame(self.dialog, padding=15)
-        frame.pack(fill=tk.BOTH, expand=True)
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Name="CheckboxPanel"/>
+        </ScrollViewer>
 
-        # Match Display Section
-        ttk.Label(frame, text="Match Display", font=('TkDefaultFont', 10, 'bold')).pack(anchor=tk.W)
-        ttk.Separator(frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(2, 5))
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
+            <Button Name="SaveBtn" Content="Save" Width="75" Margin="0,0,10,0"/>
+            <Button Name="CancelBtn" Content="Cancel" Width="75"/>
+        </StackPanel>
+    </Grid>
+</Window>
+"@
 
-        for key, label in self.MATCH_SETTINGS:
-            var = tk.BooleanVar(value=config.get(key, True))
-            self.vars[key] = var
-            cb = ttk.Checkbutton(frame, text=label, variable=var)
-            cb.pack(anchor=tk.W, padx=10, pady=2)
+$reader = New-Object System.Xml.XmlNodeReader $xaml
+$window = [Windows.Markup.XamlReader]::Load($reader)
 
-        # Spacer
-        ttk.Frame(frame, height=15).pack()
+$panel = $window.FindName("CheckboxPanel")
+$checkboxes = @{{}}
 
-        # Player Statistics Section
-        ttk.Label(frame, text="Player Statistics", font=('TkDefaultFont', 10, 'bold')).pack(anchor=tk.W)
-        ttk.Separator(frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(2, 5))
+foreach ($setting in $settings) {{
+    $cb = New-Object System.Windows.Controls.CheckBox
+    $cb.Content = $setting.Label
+    $cb.IsChecked = $setting.Checked
+    $cb.Margin = "0,5,0,5"
+    $panel.Children.Add($cb) | Out-Null
+    $checkboxes[$setting.Key] = $cb
+}}
 
-        for key, label in self.PLAYER_SETTINGS:
-            var = tk.BooleanVar(value=config.get(key, True))
-            self.vars[key] = var
-            cb = ttk.Checkbutton(frame, text=label, variable=var)
-            cb.pack(anchor=tk.W, padx=10, pady=2)
+$result = $null
 
-        # Spacer
-        ttk.Frame(frame, height=15).pack()
+$window.FindName("SaveBtn").Add_Click({{
+    $script:result = @{{}}
+    foreach ($key in $checkboxes.Keys) {{
+        $script:result[$key] = $checkboxes[$key].IsChecked
+    }}
+    $window.Close()
+}})
 
-        # Buttons frame
-        btn_frame = ttk.Frame(frame)
-        btn_frame.pack(fill=tk.X, side=tk.BOTTOM)
+$window.FindName("CancelBtn").Add_Click({{
+    $window.Close()
+}})
 
-        ttk.Button(btn_frame, text="Cancel", command=self._cancel).pack(side=tk.RIGHT, padx=(5, 0))
-        ttk.Button(btn_frame, text="Save", command=self._save).pack(side=tk.RIGHT)
+$window.ShowDialog() | Out-Null
 
-        # Bind Escape key
-        self.dialog.bind('<Escape>', lambda e: self._cancel())
+if ($result) {{
+    $output = @()
+    foreach ($key in $result.Keys) {{
+        $val = if ($result[$key]) {{ "1" }} else {{ "0" }}
+        $output += "$key=$val"
+    }}
+    $output -join "|"
+}} else {{
+    "::CANCELLED::"
+}}
+'''
 
-        # Wait for dialog to close
-        self.dialog.wait_window()
+    try:
+        result = subprocess.run(
+            ['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        )
 
-    def _save(self):
-        self.result = {key: var.get() for key, var in self.vars.items()}
-        self.dialog.destroy()
+        output = result.stdout.strip()
+        if output == "::CANCELLED::" or not output:
+            return None
 
-    def _cancel(self):
-        self.result = None
-        self.dialog.destroy()
+        # Parse output
+        settings_dict = {}
+        for item in output.split("|"):
+            if "=" in item:
+                key, val = item.split("=", 1)
+                settings_dict[key] = val == "1"
+
+        return settings_dict
+
+    except Exception as e:
+        logger.error(f"Failed to show checkbox dialog: {e}")
+        return None
 
 
 class SystemTray:
@@ -287,76 +333,84 @@ class SystemTray:
     def _change_username(self, icon: pystray.Icon, item: MenuItem) -> None:
         """Show dialog to change FACEIT username."""
         def show_dialog():
-            import tkinter.messagebox as messagebox
-
             try:
-                root = _get_tk_root()
                 current_username = self.config.faceit_nickname if self.config else ""
 
-                dialog = UsernameDialog(root, current_username)
+                new_username = _windows_input_box(
+                    "Change FACEIT Username",
+                    "Enter new FACEIT username:",
+                    current_username
+                )
 
-                if dialog.result is not None:
-                    new_username = dialog.result
+                if new_username is None:
+                    # User cancelled
+                    return
 
-                    if not new_username:
-                        messagebox.showerror("Error", "Username cannot be empty.", parent=root)
-                        root.destroy()
-                        return
+                new_username = new_username.strip()
 
-                    if new_username == current_username:
-                        root.destroy()
-                        return
+                if not new_username:
+                    _windows_message_box("Error", "Username cannot be empty.", 0)
+                    return
 
-                    # Update the .env file
-                    if self.config:
-                        success, error = self.config.update_env_value("FACEIT_NICKNAME", new_username)
+                if new_username == current_username:
+                    return
 
-                        if success:
-                            logger.info(f"Username changed to: {new_username}")
+                # Update the .env file
+                if self.config:
+                    success, error = self.config.update_env_value("FACEIT_NICKNAME", new_username)
 
-                            # Ask user to restart
-                            restart = messagebox.askyesno(
-                                "Restart Required",
-                                f"Username changed to '{new_username}'.\n\n"
-                                "The application needs to restart to apply this change.\n\n"
-                                "Restart now?",
-                                parent=root
-                            )
+                    if success:
+                        logger.info(f"Username changed to: {new_username}")
 
-                            if restart:
-                                root.destroy()
-                                self._restart_application()
-                                return
-                        else:
-                            messagebox.showerror("Error", f"Failed to save username:\n{error}", parent=root)
+                        # Ask user to restart (4 = Yes/No buttons)
+                        result = _windows_message_box(
+                            "Restart Required",
+                            f"Username changed to '{new_username}'.\n\n"
+                            "The application needs to restart to apply this change.\n\n"
+                            "Restart now?",
+                            4
+                        )
 
-                root.destroy()
+                        if result == 6:  # Yes clicked
+                            self._restart_application()
+                    else:
+                        _windows_message_box("Error", f"Failed to save username:\n{error}", 0)
 
             except Exception as e:
                 logger.error(f"Error in username dialog: {e}")
-                try:
-                    import tkinter.messagebox as mb
-                    mb.showerror("Error", f"An error occurred: {e}")
-                except:
-                    pass
+                _windows_message_box("Error", f"An error occurred: {e}", 0)
 
         # Run dialog in a separate thread to avoid blocking the tray
         threading.Thread(target=show_dialog, daemon=True).start()
 
     def _configure_stats(self, icon: pystray.Icon, item: MenuItem) -> None:
         """Show dialog to configure display stats."""
+        # All settings to display
+        ALL_SETTINGS = [
+            ("show_map", "Show Map Name"),
+            ("show_score", "Show Round Score"),
+            ("show_elo", "Show ELO at Stake"),
+            ("show_avg_elo", "Show Average ELO"),
+            ("show_kda", "Show K/D/A Stats"),
+            ("show_current_elo", "Show Current ELO"),
+            ("show_country", "Show Country"),
+            ("show_region_rank", "Show Regional Rank"),
+            ("show_today_elo", "Show Today's ELO Change"),
+            ("show_fpl", "Show FPL/FPL-C Status"),
+        ]
+
         def show_dialog():
-            import tkinter.messagebox as messagebox
-
             try:
-                root = _get_tk_root()
+                result = _windows_checkbox_dialog(
+                    "Configure Display Stats",
+                    ALL_SETTINGS,
+                    self.config
+                )
 
-                dialog = StatsConfigDialog(root, self.config)
-
-                if dialog.result is not None:
+                if result is not None:
                     # Apply all changes
                     changes_made = False
-                    for key, value in dialog.result.items():
+                    for key, value in result.items():
                         current_value = self.config.get(key, True)
                         if current_value != value:
                             self.config.set(key, value)
@@ -369,15 +423,9 @@ class SystemTray:
                         icon.update_menu()
                         logger.info("Stats configuration updated")
 
-                root.destroy()
-
             except Exception as e:
                 logger.error(f"Error in stats config dialog: {e}")
-                try:
-                    import tkinter.messagebox as mb
-                    mb.showerror("Error", f"An error occurred: {e}")
-                except:
-                    pass
+                _windows_message_box("Error", f"An error occurred: {e}", 0)
 
         # Run dialog in a separate thread to avoid blocking the tray
         threading.Thread(target=show_dialog, daemon=True).start()
@@ -500,12 +548,6 @@ class SystemTray:
             MenuItem(
                 "Configure Stats...",
                 self._configure_stats,
-            ),
-            Menu.SEPARATOR,
-            MenuItem(
-                "View Current Match",
-                self._open_match,
-                enabled=lambda item: self.get_match_url is not None,
             ),
             Menu.SEPARATOR,
             MenuItem("Exit", self._exit),

@@ -92,10 +92,15 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Copy .env.example to dist folder
+REM Create minimal .env file (API keys are embedded in the exe)
 echo.
-echo Copying configuration template...
-copy ".env.example" "dist\.env.example" >nul
+echo Creating configuration file...
+(
+echo # Faceit Discord Status Configuration
+echo # Enter your FACEIT username below, or leave empty to be prompted on first run
+echo FACEIT_NICKNAME=
+) > "dist\.env"
+echo Created .env file - user will be prompted for username on first run
 
 REM Create a README for the dist folder
 echo.
@@ -104,22 +109,19 @@ echo Creating distribution README...
 echo Faceit Discord Status - Standalone Executable
 echo ==============================================
 echo.
-echo SETUP INSTRUCTIONS:
+echo QUICK START:
 echo.
-echo 1. Copy the .env.example file to .env
-echo 2. Edit the .env file with your credentials:
-echo    - FACEIT_API_KEY: Get from https://developers.faceit.com/
-echo    - FACEIT_NICKNAME: Your FACEIT username ^(case-sensitive^)
-echo    - DISCORD_APP_ID: Create at https://discord.com/developers/applications
+echo 1. Run FaceitDiscordStatus.exe
+echo 2. Enter your FACEIT username when prompted ^(case-sensitive^)
+echo 3. Done! The app will appear in your system tray.
 echo.
-echo 3. Run FaceitDiscordStatus.exe
-echo.
-echo The application will appear in your system tray.
 echo Right-click the tray icon to access settings and controls.
 echo.
+echo TO CHANGE USERNAME LATER:
+echo Right-click tray icon ^> "Change FACEIT Username..."
+echo.
 echo NOTES:
-echo - The .env file must be in the same folder as the executable
-echo - A config.json file will be created automatically for your preferences
+echo - A config.json file will be created for your preferences
 echo - Logs are stored in a 'logs' folder
 ) > "dist\README.txt"
 
@@ -130,8 +132,9 @@ echo ========================================
 echo.
 echo Output: dist\FaceitDiscordStatus.exe
 echo.
-echo Before running:
-echo 1. Copy dist\.env.example to dist\.env
-echo 2. Edit dist\.env with your API credentials
+echo API keys are embedded in the executable.
+echo Your friend will be prompted for their FACEIT username on first run.
+echo.
+echo To share: Send the 'dist' folder to your friend.
 echo.
 pause

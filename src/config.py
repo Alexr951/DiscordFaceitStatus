@@ -52,15 +52,20 @@ class Config:
         self._load_env()
         self._load_settings()
 
+    # Embedded defaults (compiled into executable)
+    _EMBEDDED_API_KEY = "d059caf3-bf65-44ee-8391-133a1c49f76b"
+    _EMBEDDED_DISCORD_ID = "1459995747989848238"
+
     def _load_env(self) -> None:
         """Load environment variables from .env file."""
         # Look for .env in app root (works for both dev and packaged)
         env_path = get_app_root() / ".env"
         load_dotenv(env_path)
 
-        self.faceit_api_key = os.getenv("FACEIT_API_KEY", "")
+        # Use embedded defaults if not set in .env (for distributed exe)
+        self.faceit_api_key = os.getenv("FACEIT_API_KEY", "") or self._EMBEDDED_API_KEY
         self.faceit_nickname = os.getenv("FACEIT_NICKNAME", "")
-        self.discord_app_id = os.getenv("DISCORD_APP_ID", "")
+        self.discord_app_id = os.getenv("DISCORD_APP_ID", "") or self._EMBEDDED_DISCORD_ID
 
     def _load_settings(self) -> None:
         """Load user settings from config.json."""
@@ -99,29 +104,39 @@ class Config:
             Tuple of (success, error_message)
         """
         env_path = self._get_env_path()
+        logger.info(f"Attempting to update {key} to '{value}' in {env_path}")
 
         try:
             # Read existing content
             if env_path.exists():
                 with open(env_path, "r", encoding="utf-8") as f:
                     content = f.read()
+                logger.debug(f"Read .env file, length: {len(content)}")
             else:
                 content = ""
+                logger.warning(f".env file does not exist at {env_path}")
 
-            # Check if key exists and update it
-            pattern = rf'^{re.escape(key)}=.*$'
+            # Normalize line endings to \n for consistent processing
+            content = content.replace('\r\n', '\n').replace('\r', '\n')
+
+            # Check if key exists and update it (handle optional \r before end of line)
+            pattern = rf'^{re.escape(key)}=.*?$'
             if re.search(pattern, content, re.MULTILINE):
                 # Update existing key
                 content = re.sub(pattern, f'{key}={value}', content, flags=re.MULTILINE)
+                logger.info(f"Updated existing {key} in .env")
             else:
                 # Add new key
                 if content and not content.endswith('\n'):
                     content += '\n'
                 content += f'{key}={value}\n'
+                logger.info(f"Added new {key} to .env")
 
             # Write back to file
             with open(env_path, "w", encoding="utf-8") as f:
                 f.write(content)
+
+            logger.info(f"Successfully wrote .env file to {env_path}")
 
             # Update in-memory value
             if key == "FACEIT_NICKNAME":
@@ -131,7 +146,10 @@ class Config:
             elif key == "DISCORD_APP_ID":
                 self.discord_app_id = value
 
-            logger.info(f"Updated {key} in .env file")
+            # Also update the environment variable so it persists if not restarting
+            os.environ[key] = value
+
+            logger.info(f"Updated {key} in .env file to '{value}'")
             return True, None
 
         except IOError as e:
@@ -141,6 +159,8 @@ class Config:
         except Exception as e:
             error_msg = f"Unexpected error updating .env: {e}"
             logger.error(error_msg)
+            import traceback
+            logger.error(traceback.format_exc())
             return False, error_msg
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -160,12 +180,13 @@ class Config:
         """
         errors = []
 
+        # API key and Discord ID have embedded defaults, so only check nickname
         if not self.faceit_api_key:
-            errors.append("FACEIT_API_KEY is not set in .env")
+            errors.append("FACEIT_API_KEY is not set")
         if not self.faceit_nickname:
-            errors.append("FACEIT_NICKNAME is not set in .env")
+            errors.append("FACEIT_NICKNAME is not set. Right-click the tray icon to set your username.")
         if not self.discord_app_id:
-            errors.append("DISCORD_APP_ID is not set in .env")
+            errors.append("DISCORD_APP_ID is not set")
 
         return len(errors) == 0, errors
 

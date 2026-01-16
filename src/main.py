@@ -6,10 +6,37 @@ import sys
 
 from .config import Config
 from .monitor import MatchMonitor
-from .tray import SystemTray
+from .tray import SystemTray, _windows_input_box, _windows_message_box
 from .utils import setup_logging
 
 logger = logging.getLogger(__name__)
+
+
+def prompt_for_username(config: Config) -> bool:
+    """Prompt user to enter their FACEIT username.
+
+    Returns:
+        True if username was set, False if cancelled
+    """
+    username = _windows_input_box(
+        "FACEIT Username Required",
+        "Enter your FACEIT username (case-sensitive):",
+        ""
+    )
+
+    if username is None or not username.strip():
+        return False
+
+    username = username.strip()
+    success, error = config.update_env_value("FACEIT_NICKNAME", username)
+
+    if success:
+        config.faceit_nickname = username
+        logger.info(f"Username set to: {username}")
+        return True
+    else:
+        _windows_message_box("Error", f"Failed to save username: {error}", 0)
+        return False
 
 
 def main() -> int:
@@ -26,13 +53,23 @@ def main() -> int:
     # Load configuration
     config = Config()
 
+    # If nickname is missing, prompt for it
+    if not config.faceit_nickname:
+        logger.info("No FACEIT nickname configured, prompting user...")
+        if not prompt_for_username(config):
+            _windows_message_box(
+                "Setup Cancelled",
+                "FACEIT username is required to run this application.\n\nExiting.",
+                0
+            )
+            return 1
+
     # Validate configuration
     is_valid, errors = config.validate()
     if not is_valid:
         for error in errors:
             logger.error(error)
-            print(f"Configuration error: {error}")
-        print("\nPlease check your .env file. See .env.example for required values.")
+        _windows_message_box("Configuration Error", "\n".join(errors), 0)
         return 1
 
     # Create monitor
