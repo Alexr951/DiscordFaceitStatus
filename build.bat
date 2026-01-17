@@ -76,11 +76,24 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM Reinstall Pillow with pip to ensure bundled DLLs (fixes Anaconda issues)
+echo.
+echo Reinstalling Pillow to ensure proper DLL bundling...
+%PYTHON_CMD% -m pip uninstall -y Pillow >nul 2>&1
+%PYTHON_CMD% -m pip install --force-reinstall Pillow
+if errorlevel 1 (
+    echo WARNING: Pillow reinstall had issues, continuing anyway...
+)
+
 REM Clean previous build
 echo.
 echo Cleaning previous build artifacts...
 if exist "dist" rmdir /s /q "dist"
 if exist "build" rmdir /s /q "build"
+
+REM Clear PyInstaller cache to ensure fresh DLL collection
+echo Clearing PyInstaller cache...
+if exist "%LOCALAPPDATA%\pyinstaller" rmdir /s /q "%LOCALAPPDATA%\pyinstaller"
 
 REM Build the executable
 echo.
