@@ -115,7 +115,7 @@ echo.
 echo QUICK START:
 echo.
 echo 1. Run FaceitDiscordStatus.exe
-echo 2. Type your FACEIT nickname into the setup window ^(case-sensitive^)
+echo 2. It finds your FACEIT account via your Steam login - click Save ^& Start
 echo 3. Done! The app lives in your system tray ^(near the clock^).
 echo.
 echo Right-click the tray icon for settings:

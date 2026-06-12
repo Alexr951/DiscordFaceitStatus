@@ -14,7 +14,9 @@ pip install -r requirements.txt
 python run.py          # add --debug for verbose logging
 ```
 
-On first run a setup window asks for the Faceit nickname. Settings and logs live in `%APPDATA%\FaceitDiscordStatus`.
+On first run a setup window detects the Faceit account linked to the local
+Steam login (`src/steam.py`), falling back to manual nickname entry. Settings
+and logs live in `%APPDATA%\FaceitDiscordStatus`.
 
 The Faceit API key and Discord application ID are embedded in `src/config.py`
 (`EMBEDDED_API_KEY`, `EMBEDDED_DISCORD_APP_ID`). To use your own, replace those

@@ -2,11 +2,11 @@
 
 Show your live **Faceit CS2 match** in your **Discord status** — map, score, ELO and more, updating automatically while you play.
 
-## Setup (2 minutes, no technical knowledge needed)
+## Setup (under a minute, nothing to configure)
 
 1. **Download** `FaceitDiscordStatus.exe` from the [latest release](https://github.com/yourusername/DiscordFaceitStatus/releases).
-2. **Run it.** A setup window asks for your Faceit nickname — type it and click **Save & Start**.
-3. **That's it.** The app now lives in your system tray (next to the clock). Play a Faceit match and your Discord status updates automatically.
+2. **Run it.** It finds your Faceit account automatically through your Steam login and shows it to you — just click **Save & Start**.
+3. **That's it.** The app lives in your system tray (next to the clock). Play a Faceit match and your Discord status updates by itself.
 
 > **Windows SmartScreen warning?** Click "More info" → "Run anyway". The exe is unsigned, which is why Windows shows the warning.
 
@@ -20,6 +20,10 @@ Show your live **Faceit CS2 match** in your **Discord status** — map, score, E
 
 Everything is optional — turn any of it off in **Settings**.
 
+## How it knows it's really you
+
+Your Faceit account is linked to your Steam account, and the app reads which Steam user is logged in on your PC. That's the account it tracks — so nobody can run around with s1mple's ELO in their status. If you enter a nickname that isn't linked to your Steam login, the app corrects it to your real account (or refuses to show a status until it's fixed). If Steam isn't installed, it falls back to plain nickname entry.
+
 ## The tray menu
 
 Right-click the tray icon:
@@ -29,7 +33,7 @@ Right-click the tray icon:
 | Status / Tracking | Shows what the app is doing and whose matches it follows |
 | Show match status in Discord | Master on/off switch |
 | View Current Match | Opens your live match page on Faceit |
-| Settings... | Change nickname and choose what's shown in Discord |
+| Settings... | Choose what's shown in Discord, change account |
 | Start with Windows | Launch automatically when your PC starts |
 | Exit | Close the app |
 
@@ -40,7 +44,9 @@ Right-click the tray icon:
 - In Discord: User Settings → Activity Privacy → enable **"Share your detected activities with others"**.
 - You must be in an actual Faceit match — the status appears once the match starts.
 
-**Wrong player being tracked** — Right-click tray icon → Settings → change the nickname (it's case-sensitive).
+**It detected the wrong account** — It tracks the Faceit account linked to the Steam user currently logged in on this PC. Log into Steam with the right account and restart the app.
+
+**"Account mismatch" notification** — The configured nickname isn't linked to your Steam login. Open Settings and use your own nickname.
 
 **"Discord not found" notification** — Start Discord; the app reconnects automatically.
 
