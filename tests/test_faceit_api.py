@@ -1,6 +1,29 @@
 """Tests for Faceit API helpers."""
 
-from src.faceit_api import FaceitAPI, parse_timestamp
+from src.faceit_api import FaceitAPI, _pick_active_match, parse_timestamp
+
+
+def test_pick_active_match_prefers_ongoing():
+    payload = {
+        "READY": [{"id": "m-ready", "game": "cs2"}],
+        "ONGOING": [{"id": "m-live", "game": "cs2"}],
+    }
+    assert _pick_active_match(payload) == "m-live"
+
+
+def test_pick_active_match_lobby_states():
+    payload = {"VOTING": [{"id": "m-vote", "game": "cs2"}]}
+    assert _pick_active_match(payload) == "m-vote"
+
+
+def test_pick_active_match_ignores_other_games():
+    payload = {"ONGOING": [{"id": "m-dota", "game": "dota2"}]}
+    assert _pick_active_match(payload) is None
+
+
+def test_pick_active_match_empty():
+    assert _pick_active_match({}) is None
+    assert _pick_active_match({"ONGOING": []}) is None
 
 SAMPLE_PLAYER = {
     "player_id": "p-123",

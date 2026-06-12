@@ -116,7 +116,9 @@ echo QUICK START:
 echo.
 echo 1. Run FaceitDiscordStatus.exe
 echo 2. It finds your FACEIT account via your Steam login - click Save ^& Start
-echo 3. Done! The app lives in your system tray ^(near the clock^).
+echo 3. In Discord: Settings ^> Activity Privacy ^> enable
+echo    "Share your detected activities with others"
+echo 4. Done! The app lives in your system tray ^(near the clock^).
 echo.
 echo Right-click the tray icon for settings:
 echo - Settings... : change nickname and what shows in Discord

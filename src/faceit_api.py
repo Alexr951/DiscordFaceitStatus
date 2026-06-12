@@ -13,10 +13,23 @@ logger = logging.getLogger(__name__)
 
 # Faceit API base URLs
 BASE_URL = "https://open.faceit.com/data/v4"
+WEB_API_URL = "https://api.faceit.com"  # faceit.com's own (unofficial) web API
 THIRD_PARTY_API_URL = "https://faceit.lcrypt.eu"
 
 # CS2 game ID on Faceit
 CS2_GAME_ID = "cs2"
+
+
+def _pick_active_match(payload: dict) -> Optional[str]:
+    """Pick the most relevant CS2 match ID from a groupByState payload."""
+    for state in ("ONGOING", "READY", "VOTING", "CONFIGURING"):
+        for match in payload.get(state, []):
+            if match.get("game", CS2_GAME_ID) != CS2_GAME_ID:
+                continue
+            match_id = match.get("id")
+            if match_id:
+                return match_id
+    return None
 
 
 def parse_timestamp(value) -> Optional[int]:
@@ -141,15 +154,19 @@ class FaceitAPI:
             "Accept": "application/json",
         })
 
-        # Separate unauthenticated session for the third-party API (never
+        # Separate unauthenticated session for non-Data-API hosts (never
         # send the Faceit bearer token to another host).
-        self._lcrypt_session = requests.Session()
+        self._web_session = requests.Session()
 
         # Rate limiting (per host, guarded for cross-thread use)
         self._rate_lock = threading.Lock()
         self._last_request_time: dict[str, float] = {}
         self._min_request_interval = 1.0  # seconds between requests per host
+
+        # Circuit breaker for the third-party live-stats API
         self._lcrypt_warned = False
+        self._lcrypt_failures = 0
+        self._lcrypt_disabled_until = 0.0
 
         # Cache
         self._player_cache: dict[str, tuple[PlayerInfo, float]] = {}
@@ -283,13 +300,15 @@ class FaceitAPI:
         Returns:
             LiveMatchInfo if in live match, None otherwise
         """
+        if time.time() < self._lcrypt_disabled_until:
+            return None
         try:
             self._rate_limit("lcrypt")
             url = f"{THIRD_PARTY_API_URL}/?n={nickname}"
-            response = self._lcrypt_session.get(url, timeout=10)
+            response = self._web_session.get(url, timeout=10)
 
             if response.status_code != 200:
-                logger.debug(f"[third-party] API returned status {response.status_code}")
+                self._lcrypt_failure(f"status {response.status_code}")
                 return None
 
             data = response.json()
@@ -361,38 +380,56 @@ class FaceitAPI:
 
             logger.debug(f"[third-party] Found live match: {live_info.map_name} ({score_team1}:{score_team2})")
             self._lcrypt_warned = False
+            self._lcrypt_failures = 0
             return live_info
 
         except Exception as e:
-            if not self._lcrypt_warned:
-                self._lcrypt_warned = True
-                logger.warning(
-                    f"Live match API unavailable, falling back to official API: {e}"
-                )
-            else:
-                logger.debug(f"[third-party] Error: {e}")
+            self._lcrypt_failure(str(e))
             return None
+
+    def _lcrypt_failure(self, reason: str) -> None:
+        """Track third-party API failures; pause it after repeated errors so
+        a dead service doesn't cost a wasted request every poll."""
+        self._lcrypt_failures += 1
+        if not self._lcrypt_warned:
+            self._lcrypt_warned = True
+            logger.warning(
+                f"Live-stats API unavailable ({reason}) - using official API only"
+            )
+        else:
+            logger.debug(f"[third-party] Error: {reason}")
+        if self._lcrypt_failures >= 5:
+            self._lcrypt_disabled_until = time.time() + 1800
+            self._lcrypt_failures = 0
+            logger.info("Live-stats API paused for 30 minutes")
 
     def get_ongoing_match(self, player_id: str) -> Optional[str]:
         """Return the player's active match ID, or None.
+
+        Uses the same endpoint the Faceit website uses to show a player's
+        current match (the public Data API has no active-match endpoint, and
+        its history endpoint only lists finished matches).
 
         Raises:
             FaceitAPIError: If the request fails. Callers rely on this to
                 distinguish "definitely no match" from a transient API error,
                 so a hiccup doesn't wipe the presence.
         """
-        # NOTE: the public Data API has no dedicated "active match" endpoint;
-        # empirically the v4 history endpoint lists the current match with a
-        # transitional status (READY/VOTING/ONGOING/...) while it is played.
-        data = self._request(
-            f"/players/{player_id}/history",
-            {"game": CS2_GAME_ID, "limit": 5},
-        )
-        for match in data.get("items", []):
-            status = match.get("status", "").upper()
-            if status in ("READY", "ONGOING", "VOTING", "CONFIGURING", "LIVE"):
-                return match.get("match_id") or None
-        return None
+        self._rate_limit("faceit-web")
+        url = f"{WEB_API_URL}/match/v1/matches/groupByState"
+        try:
+            response = self._web_session.get(
+                url, params={"userId": player_id}, timeout=10
+            )
+        except requests.RequestException as e:
+            raise FaceitAPIError(f"Active-match request failed: {e}")
+        if response.status_code != 200:
+            raise FaceitAPIError(f"Active-match API error: {response.status_code}")
+        try:
+            payload = response.json().get("payload", {})
+        except ValueError:
+            raise FaceitAPIError("Active-match API returned invalid JSON")
+        return _pick_active_match(payload)
 
     def get_match_details(self, match_id: str, player_id: str) -> MatchInfo:
         """Get detailed match information.

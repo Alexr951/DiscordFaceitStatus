@@ -6,7 +6,8 @@ Show your live **Faceit CS2 match** in your **Discord status** — map, score, E
 
 1. **Download** `FaceitDiscordStatus.exe` from the [latest release](https://github.com/yourusername/DiscordFaceitStatus/releases).
 2. **Run it.** It finds your Faceit account automatically through your Steam login and shows it to you — just click **Save & Start**.
-3. **That's it.** The app lives in your system tray (next to the clock). Play a Faceit match and your Discord status updates by itself.
+3. **Let Discord show it** (one-time): in Discord go to **User Settings → Activity Privacy** and turn on **"Share your detected activities with others"**.
+4. **That's it.** The app lives in your system tray (next to the clock). Play a Faceit match and your Discord status updates by itself.
 
 > **Windows SmartScreen warning?** Click "More info" → "Run anyway". The exe is unsigned, which is why Windows shows the warning.
 
@@ -41,7 +42,7 @@ Right-click the tray icon:
 
 **Nothing shows in Discord**
 - Make sure the **Discord desktop app** is running (not just the browser version).
-- In Discord: User Settings → Activity Privacy → enable **"Share your detected activities with others"**.
+- In Discord: User Settings → **Activity Privacy** → enable **"Share your detected activities with others"** (and don't set your status to Invisible).
 - You must be in an actual Faceit match — the status appears once the match starts.
 
 **It detected the wrong account** — It tracks the Faceit account linked to the Steam user currently logged in on this PC. Log into Steam with the right account and restart the app.
