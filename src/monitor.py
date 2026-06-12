@@ -5,9 +5,16 @@ import threading
 import time
 from typing import Callable, Optional
 
+from . import steam
 from .config import Config
 from .discord_rpc import DiscordRPC
-from .faceit_api import FaceitAPI, FaceitAPIError, LiveMatchInfo, MatchInfo
+from .faceit_api import (
+    FaceitAPI,
+    FaceitAPIError,
+    LiveMatchInfo,
+    MatchInfo,
+    PlayerInfo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +70,10 @@ class MatchMonitor:
         self._notified_discord_down = False
         self._notified_player_error = False
         self._notified_api_outage = False
+        self._notified_mismatch = False
+
+        # Resolves the locally logged-in Steam account (injectable for tests)
+        self._local_steam = steam.get_logged_in_steam64
 
         # Callbacks for UI updates
         self._on_status_change: Optional[Callable[[str], None]] = None
@@ -144,6 +155,17 @@ class MatchMonitor:
             player = self.faceit.get_player_by_nickname(nickname)
         except FaceitAPIError as e:
             return False, str(e)
+        ok, local_player = self._verify_ownership(player)
+        if not ok:
+            hint = (
+                f" Your Steam login is linked to '{local_player.nickname}'."
+                if local_player
+                else ""
+            )
+            return False, (
+                f"'{player.nickname}' isn't linked to the Steam account on "
+                f"this PC.{hint}"
+            )
         with self._player_lock:
             self._player_id = player.player_id
             self._player_nickname = player.nickname
@@ -211,13 +233,59 @@ class MatchMonitor:
                 )
             self._notify_error(f"Player lookup failed: {e}")
             return False
+
+        ok, local_player = self._verify_ownership(player)
+        if not ok:
+            if local_player:
+                logger.info(
+                    f"'{player.nickname}' is not linked to this PC's Steam - "
+                    f"switching to {local_player.nickname}"
+                )
+                self._notify_toast(
+                    "Account corrected",
+                    f"'{player.nickname}' isn't your Faceit account - now "
+                    f"tracking {local_player.nickname} (matched via your "
+                    "Steam login).",
+                )
+                player = local_player
+                self.config.faceit_nickname = player.nickname
+            else:
+                if not self._notified_mismatch:
+                    self._notified_mismatch = True
+                    self._notify_toast(
+                        "Account mismatch",
+                        f"'{player.nickname}' isn't linked to the Steam "
+                        "account on this PC. Open Settings and use your own "
+                        "nickname.",
+                    )
+                self._notify_status("Account mismatch - check Settings")
+                return False
+
         with self._player_lock:
             self._player_id = player.player_id
             self._player_nickname = player.nickname
         self._notified_player_error = False
+        self._notified_mismatch = False
         self._notify_status(f"Tracking {player.nickname}")
         logger.info(f"Found player: {player.nickname} (ELO: {player.elo})")
         return True
+
+    def _verify_ownership(self, player: PlayerInfo) -> tuple[bool, Optional[PlayerInfo]]:
+        """Check that a Faceit account belongs to the Steam login on this PC.
+
+        Returns (ok, local_player). ok=False is a definite mismatch;
+        local_player is the local Steam login's own Faceit account when it
+        could be resolved. When Steam or the account link can't be read, the
+        check passes (honor-system fallback - Rich Presence is client-side
+        and can't be made tamper-proof anyway).
+        """
+        local = self._local_steam()
+        if not local or not player.steam_id or player.steam_id == local:
+            return True, None
+        try:
+            return False, self.faceit.get_player_by_steam_id(local)
+        except FaceitAPIError:
+            return False, None
 
     def _ensure_discord(self) -> bool:
         """Connect to Discord if needed, toasting once when it's not running."""

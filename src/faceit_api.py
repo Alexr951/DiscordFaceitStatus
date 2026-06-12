@@ -44,6 +44,7 @@ class PlayerInfo:
     elo: int
     skill_level: int
     avatar_url: str
+    steam_id: str = ""  # Steam64 ID the Faceit account is linked to
 
 
 @dataclass
@@ -222,21 +223,30 @@ class FaceitAPI:
                 return player
 
         data = self._request("/players", {"nickname": nickname, "game": CS2_GAME_ID})
-
-        # Extract CS2-specific data
-        cs2_data = data.get("games", {}).get(CS2_GAME_ID, {})
-
-        player = PlayerInfo(
-            player_id=data["player_id"],
-            nickname=data["nickname"],
-            elo=cs2_data.get("faceit_elo", 0),
-            skill_level=cs2_data.get("skill_level", 0),
-            avatar_url=data.get("avatar", ""),
-        )
+        player = self._player_from_data(data)
 
         # Cache the result
         self._player_cache[cache_key] = (player, time.time())
 
+        return player
+
+    def get_player_by_steam_id(self, steam_id64: str) -> PlayerInfo:
+        """Get the Faceit player linked to a Steam64 ID.
+
+        Args:
+            steam_id64: 64-bit Steam ID (the CS2 game_player_id on Faceit)
+
+        Returns:
+            PlayerInfo object
+
+        Raises:
+            FaceitAPIError: If no Faceit account is linked to that Steam ID.
+        """
+        data = self._request(
+            "/players", {"game": CS2_GAME_ID, "game_player_id": steam_id64}
+        )
+        player = self._player_from_data(data)
+        self._player_cache[player.nickname.lower()] = (player, time.time())
         return player
 
     def get_player_by_id(self, player_id: str) -> PlayerInfo:
@@ -249,15 +259,19 @@ class FaceitAPI:
             PlayerInfo object
         """
         data = self._request(f"/players/{player_id}")
+        return self._player_from_data(data)
 
+    @staticmethod
+    def _player_from_data(data: dict) -> PlayerInfo:
+        """Build a PlayerInfo from a /players response payload."""
         cs2_data = data.get("games", {}).get(CS2_GAME_ID, {})
-
         return PlayerInfo(
             player_id=data["player_id"],
             nickname=data["nickname"],
             elo=cs2_data.get("faceit_elo", 0),
             skill_level=cs2_data.get("skill_level", 0),
             avatar_url=data.get("avatar", ""),
+            steam_id=str(cs2_data.get("game_player_id", "") or ""),
         )
 
     def get_live_match_info(self, nickname: str) -> Optional[LiveMatchInfo]:

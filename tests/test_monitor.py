@@ -3,8 +3,15 @@
 import time
 
 from src.config import Config
-from src.faceit_api import LiveMatchInfo, MatchInfo
+from src.faceit_api import FaceitAPIError, LiveMatchInfo, MatchInfo, PlayerInfo
 from src.monitor import GRACE_MISSES, MatchMonitor, parse_duration_to_seconds
+
+
+def make_player(nickname="tester", player_id="p1", steam_id="STEAM_LOCAL"):
+    return PlayerInfo(
+        player_id=player_id, nickname=nickname, elo=1450,
+        skill_level=6, avatar_url="", steam_id=steam_id,
+    )
 
 
 def make_live(map_name="Mirage", duration="5:00", score=(1, 0), fpl="", fplc=""):
@@ -34,6 +41,8 @@ class FakeAPI:
         self.live = None
         self.ongoing = None
         self.details = {}
+        self.players = {}  # nickname -> PlayerInfo
+        self.players_by_steam = {}  # steam64 -> PlayerInfo
 
     def get_live_match_info(self, nickname):
         return self.live
@@ -49,6 +58,16 @@ class FakeAPI:
 
     def get_elo_change(self, player_id, match_id):
         return None
+
+    def get_player_by_nickname(self, nickname):
+        if nickname not in self.players:
+            raise FaceitAPIError("Resource not found")
+        return self.players[nickname]
+
+    def get_player_by_steam_id(self, steam_id64):
+        if steam_id64 not in self.players_by_steam:
+            raise FaceitAPIError("Resource not found")
+        return self.players_by_steam[steam_id64]
 
 
 class FakeRPC:
@@ -185,3 +204,69 @@ def test_match_url_cached_for_tray(tmp_path):
 
     api.details.clear()  # cached URL must not trigger a new API call
     assert monitor.get_current_match_url() == "https://faceit.com/en/match/m1"
+
+
+# --- Steam ownership verification -----------------------------------------
+
+
+def make_unresolved_monitor(tmp_path, nickname, local_steam="STEAM_LOCAL"):
+    config = Config(data_dir=tmp_path / "data", legacy_dir=tmp_path / "legacy")
+    config.faceit_nickname = nickname
+    api = FakeAPI()
+    monitor = MatchMonitor(config, faceit=api)
+    monitor.discord = FakeRPC()
+    monitor._local_steam = lambda: local_steam
+    return monitor, api
+
+
+def test_ensure_player_passes_for_own_account(tmp_path):
+    monitor, api = make_unresolved_monitor(tmp_path, "tester")
+    api.players["tester"] = make_player("tester", steam_id="STEAM_LOCAL")
+    assert monitor._ensure_player() is True
+    assert monitor._player_nickname == "tester"
+
+
+def test_ensure_player_auto_corrects_impersonation(tmp_path):
+    monitor, api = make_unresolved_monitor(tmp_path, "s1mple")
+    api.players["s1mple"] = make_player("s1mple", "p-s1mple", steam_id="STEAM_S1MPLE")
+    api.players_by_steam["STEAM_LOCAL"] = make_player("realguy", "p-real", "STEAM_LOCAL")
+
+    assert monitor._ensure_player() is True
+    assert monitor._player_nickname == "realguy"
+    assert monitor.config.faceit_nickname == "realguy"
+
+
+def test_ensure_player_refuses_unverifiable_mismatch(tmp_path):
+    monitor, api = make_unresolved_monitor(tmp_path, "s1mple")
+    api.players["s1mple"] = make_player("s1mple", "p-s1mple", steam_id="STEAM_S1MPLE")
+    # local Steam has no Faceit account at all
+
+    assert monitor._ensure_player() is False
+    assert monitor._player_id is None
+
+
+def test_ensure_player_honor_system_without_steam(tmp_path):
+    monitor, api = make_unresolved_monitor(tmp_path, "anyname", local_steam=None)
+    api.players["anyname"] = make_player("anyname", steam_id="STEAM_OTHER")
+    assert monitor._ensure_player() is True  # can't verify -> allow
+
+
+def test_update_player_rejects_other_account(tmp_path):
+    monitor, api = make_unresolved_monitor(tmp_path, "tester")
+    api.players["tester"] = make_player("tester", steam_id="STEAM_LOCAL")
+    api.players["s1mple"] = make_player("s1mple", "p-s1mple", steam_id="STEAM_S1MPLE")
+    api.players_by_steam["STEAM_LOCAL"] = api.players["tester"]
+
+    ok, err = monitor.update_player("s1mple")
+    assert ok is False
+    assert "tester" in err  # hint at the user's real account
+
+
+def test_update_player_accepts_own_account(tmp_path):
+    monitor, api = make_unresolved_monitor(tmp_path, "old")
+    api.players["old"] = make_player("old", steam_id="STEAM_LOCAL")
+    api.players["tester"] = make_player("tester", "p-new", steam_id="STEAM_LOCAL")
+
+    ok, err = monitor.update_player("tester")
+    assert ok is True and err is None
+    assert monitor.config.faceit_nickname == "tester"

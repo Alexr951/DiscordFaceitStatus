@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Optional
 
-from . import autostart
+from . import autostart, steam
 from .config import Config
 from .faceit_api import FaceitAPI, FaceitAPIError
 
@@ -69,10 +69,10 @@ class FirstRunWizard:
         )
 
         self.nickname_var = tk.StringVar()
-        entry = ttk.Entry(frame, textvariable=self.nickname_var, width=34)
-        entry.grid(column=0, row=2, columnspan=2, sticky="we")
-        entry.focus_set()
-        entry.bind("<Return>", lambda _e: self._save())
+        self.entry = ttk.Entry(frame, textvariable=self.nickname_var, width=34)
+        self.entry.grid(column=0, row=2, columnspan=2, sticky="we")
+        self.entry.focus_set()
+        self.entry.bind("<Return>", lambda _e: self._save())
 
         self.status_var = tk.StringVar()
         ttk.Label(frame, textvariable=self.status_var, wraplength=330).grid(
@@ -90,7 +90,46 @@ class FirstRunWizard:
         self.save_btn = ttk.Button(frame, text="Save & Start", command=self._save)
         self.save_btn.grid(column=1, row=5, sticky="e", pady=(15, 0))
 
+        # Try to find the player's own account through their Steam login -
+        # no typing needed, and it stops people entering someone else's name.
+        self.detected_player = None
+        self.status_var.set("Looking up your account via Steam...")
+        threading.Thread(target=self._detect_worker, daemon=True).start()
+
+    def _detect_worker(self) -> None:
+        player = None
+        steam64 = steam.get_logged_in_steam64()
+        if steam64:
+            try:
+                player = self.api.get_player_by_steam_id(steam64)
+            except FaceitAPIError as e:
+                logger.info(f"No Faceit account found for local Steam login: {e}")
+        try:
+            self.root.after(0, lambda: self._on_detected(player))
+        except RuntimeError:
+            pass  # window already closed
+
+    def _on_detected(self, player) -> None:
+        if player:
+            self.detected_player = player
+            self.nickname_var.set(player.nickname)
+            self.entry.state(["disabled"])
+            self.status_var.set(
+                f"Found your account via Steam: {player.nickname} - Level "
+                f"{player.skill_level}, {player.elo:,} ELO.\n"
+                "Wrong account? Log into Steam with yours and restart this app."
+            )
+        else:
+            self.status_var.set(
+                "Couldn't find your account via Steam - type your Faceit "
+                "nickname above."
+            )
+
     def _save(self) -> None:
+        if self.detected_player is not None:
+            # Account already verified through the Steam login
+            self._on_validated(self.detected_player, None)
+            return
         nickname = self.nickname_var.get().strip()
         if not nickname:
             self.status_var.set("Please enter your nickname.")
