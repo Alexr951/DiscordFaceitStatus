@@ -262,6 +262,16 @@ def test_update_player_rejects_other_account(tmp_path):
     assert "tester" in err  # hint at the user's real account
 
 
+def test_disable_ownership_check_allows_any_account(tmp_path):
+    monitor, api = make_unresolved_monitor(tmp_path, "s1mple")
+    api.players["s1mple"] = make_player("s1mple", "p-s1mple", steam_id="STEAM_S1MPLE")
+    # local Steam has no Faceit account -> would normally refuse
+
+    monitor.disable_ownership_check()
+    assert monitor._ensure_player() is True
+    assert monitor._player_nickname == "s1mple"
+
+
 def test_update_player_accepts_own_account(tmp_path):
     monitor, api = make_unresolved_monitor(tmp_path, "old")
     api.players["old"] = make_player("old", steam_id="STEAM_LOCAL")

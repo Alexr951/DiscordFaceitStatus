@@ -30,6 +30,23 @@ pip install -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
 
+## Manual testing without playing a match (test mode)
+
+`--test` runs against a throwaway temp profile — your real config in
+`%APPDATA%` is never read or written, so there is nothing to revert. It also
+skips the Steam ownership check, polls every 10s, and forces debug logging.
+
+```bash
+# Watch any player who is currently in a live match (find one on faceit.com):
+python run.py --test someNickname
+
+# Exercise the first-run wizard (with Steam auto-detection):
+python run.py --test
+```
+
+Close the normal instance first — the single-instance guard allows only one
+copy at a time. Exit via the tray when done; the temp profile is abandoned.
+
 ## Build the exe
 
 ```cmd

@@ -148,6 +148,10 @@ class MatchMonitor:
     def is_running(self) -> bool:
         return self._running
 
+    def disable_ownership_check(self) -> None:
+        """Test mode: allow tracking any account (skips Steam verification)."""
+        self._local_steam = lambda: None
+
     def update_player(self, nickname: str) -> tuple[bool, Optional[str]]:
         """Switch to tracking a different player. Safe to call while running
         (used by the settings window - no app restart needed)."""

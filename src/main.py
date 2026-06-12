@@ -3,6 +3,8 @@
 import logging
 import signal
 import sys
+import tempfile
+from pathlib import Path
 
 from .config import Config
 from .faceit_api import FaceitAPI
@@ -30,16 +32,44 @@ def _already_running() -> bool:
     return ctypes.windll.kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
 
 
+def parse_test_arg(argv: list[str]) -> tuple[bool, str]:
+    """Parse `--test [nickname]` from the command line.
+
+    Returns (test_mode, nickname). Nickname is "" when --test is given alone
+    (runs the first-run wizard against a throwaway profile).
+    """
+    if "--test" not in argv:
+        return False, ""
+    i = argv.index("--test")
+    if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
+        return True, argv[i + 1]
+    return True, ""
+
+
 def main() -> int:
     """Main entry point. Returns the process exit code."""
-    setup_logging(debug="--debug" in sys.argv)
+    test_mode, test_nick = parse_test_arg(sys.argv)
+    setup_logging(debug="--debug" in sys.argv or test_mode)
     logger.info("Starting Faceit Discord Rich Presence")
 
     if _already_running():
         logger.info("Another instance is already running - exiting")
         return 0
 
-    config = Config()  # loads from %APPDATA%, migrating any legacy .env/config
+    if test_mode:
+        # Throwaway profile: the real %APPDATA% config is never read or
+        # written, so there is nothing to revert after testing.
+        temp_dir = Path(tempfile.mkdtemp(prefix="FaceitDiscordStatus-test-"))
+        config = Config(data_dir=temp_dir, legacy_dir=temp_dir)
+        config.set("poll_interval", 10)  # fast feedback while testing
+        if test_nick:
+            config.set("faceit_nickname", test_nick)
+        logger.info(
+            f"TEST MODE: temp profile at {temp_dir}"
+            + (f", tracking '{test_nick}'" if test_nick else ", wizard will run")
+        )
+    else:
+        config = Config()  # loads from %APPDATA%, migrating any legacy .env/config
     api = FaceitAPI(config.faceit_api_key)
 
     if not config.faceit_nickname:
@@ -49,6 +79,8 @@ def main() -> int:
             return 0
 
     monitor = MatchMonitor(config, faceit=api)
+    if test_mode:
+        monitor.disable_ownership_check()  # allow watching any player's match
 
     def on_toggle(enabled: bool) -> None:
         config.is_enabled = enabled
