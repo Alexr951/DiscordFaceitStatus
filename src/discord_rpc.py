@@ -99,6 +99,7 @@ class DiscordRPC:
                 pass
             self.rpc = None
         self.connected = False
+        self._presence_set = False
         logger.info("Disconnected from Discord RPC")
 
     def reconnect(self) -> bool:

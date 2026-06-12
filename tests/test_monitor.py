@@ -7,7 +7,7 @@ from src.faceit_api import LiveMatchInfo, MatchInfo
 from src.monitor import GRACE_MISSES, MatchMonitor, parse_duration_to_seconds
 
 
-def make_live(map_name="Mirage", duration="5:00", score=(1, 0)):
+def make_live(map_name="Mirage", duration="5:00", score=(1, 0), fpl="", fplc=""):
     return LiveMatchInfo(
         is_live=True, map_name=map_name, score_team1=score[0], score_team2=score[1],
         elo_at_stake="+25/-25", server="EU", queue_name="5v5", win_chance=50,
@@ -16,7 +16,7 @@ def make_live(map_name="Mirage", duration="5:00", score=(1, 0)):
         region_ranking=100, country_ranking=10, ladder_position=0,
         ladder_division="", ladder_points=0, ladder_win_rate=0.0,
         today_elo_change="+25", today_wins=1, today_losses=0, today_matches=1,
-        fpl_status="", fplc_status="", trend="W", last_match="",
+        fpl_status=fpl, fplc_status=fplc, trend="W", last_match="",
     )
 
 
@@ -156,6 +156,25 @@ def test_finished_result_shown_then_cleared(tmp_path):
     monitor._finished_shown_at = time.time() - 9999  # linger window elapsed
     monitor._check_match()
     assert rpc.clear_count == 1
+
+
+def test_fpl_label_not_shown_for_regular_players(tmp_path):
+    monitor, api, rpc = make_monitor(tmp_path)
+
+    # Empty FPL fields (regular player) must NOT produce an FPL label
+    api.live = make_live(fpl="", fplc="")
+    monitor._check_match()
+    assert rpc.updates[-1][1]["fpl_status"] is None
+
+    # Explicit "does not participate" must NOT produce an FPL label
+    api.live = make_live(fpl="You do not participate in FPL", fplc="")
+    monitor._check_match()
+    assert rpc.updates[-1][1]["fpl_status"] is None
+
+    # A real FPL entry does
+    api.live = make_live(fpl="FPL Europe", fplc="")
+    monitor._check_match()
+    assert rpc.updates[-1][1]["fpl_status"] == "FPL"
 
 
 def test_match_url_cached_for_tray(tmp_path):

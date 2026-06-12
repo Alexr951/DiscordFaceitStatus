@@ -13,11 +13,31 @@ from .utils import setup_logging
 
 logger = logging.getLogger(__name__)
 
+# Keep the mutex handle alive for the lifetime of the process.
+_instance_mutex = None
+
+
+def _already_running() -> bool:
+    """Windows named-mutex guard so a second launch exits instead of
+    creating a duplicate tray icon (e.g. auto-start + manual start)."""
+    if sys.platform != "win32":
+        return False
+    global _instance_mutex
+    import ctypes
+    _instance_mutex = ctypes.windll.kernel32.CreateMutexW(
+        None, False, "FaceitDiscordStatus_SingleInstance"
+    )
+    return ctypes.windll.kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
+
 
 def main() -> int:
     """Main entry point. Returns the process exit code."""
     setup_logging(debug="--debug" in sys.argv)
     logger.info("Starting Faceit Discord Rich Presence")
+
+    if _already_running():
+        logger.info("Another instance is already running - exiting")
+        return 0
 
     config = Config()  # loads from %APPDATA%, migrating any legacy .env/config
     api = FaceitAPI(config.faceit_api_key)

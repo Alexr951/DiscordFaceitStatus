@@ -140,6 +140,10 @@ class FaceitAPI:
             "Accept": "application/json",
         })
 
+        # Separate unauthenticated session for the third-party API (never
+        # send the Faceit bearer token to another host).
+        self._lcrypt_session = requests.Session()
+
         # Rate limiting (per host, guarded for cross-thread use)
         self._rate_lock = threading.Lock()
         self._last_request_time: dict[str, float] = {}
@@ -151,12 +155,22 @@ class FaceitAPI:
         self._cache_ttl = 300  # 5 minutes
 
     def _rate_limit(self, host: str = "official") -> None:
-        """Ensure we don't exceed rate limits (tracked per host)."""
+        """Ensure we don't exceed rate limits (tracked per host).
+
+        The wait happens outside the lock so a sleeping caller doesn't block
+        other threads (monitor loop vs. settings-window validation).
+        """
         with self._rate_lock:
-            elapsed = time.time() - self._last_request_time.get(host, 0)
-            if elapsed < self._min_request_interval:
-                time.sleep(self._min_request_interval - elapsed)
-            self._last_request_time[host] = time.time()
+            now = time.time()
+            wait = max(
+                0.0,
+                self._last_request_time.get(host, 0)
+                + self._min_request_interval
+                - now,
+            )
+            self._last_request_time[host] = now + wait
+        if wait:
+            time.sleep(wait)
 
     def _request(self, endpoint: str, params: Optional[dict] = None) -> dict:
         """Make a request to the Faceit API.
@@ -258,7 +272,7 @@ class FaceitAPI:
         try:
             self._rate_limit("lcrypt")
             url = f"{THIRD_PARTY_API_URL}/?n={nickname}"
-            response = requests.get(url, timeout=10)
+            response = self._lcrypt_session.get(url, timeout=10)
 
             if response.status_code != 200:
                 logger.debug(f"[third-party] API returned status {response.status_code}")
@@ -353,6 +367,9 @@ class FaceitAPI:
                 distinguish "definitely no match" from a transient API error,
                 so a hiccup doesn't wipe the presence.
         """
+        # NOTE: the public Data API has no dedicated "active match" endpoint;
+        # empirically the v4 history endpoint lists the current match with a
+        # transitional status (READY/VOTING/ONGOING/...) while it is played.
         data = self._request(
             f"/players/{player_id}/history",
             {"game": CS2_GAME_ID, "limit": 5},

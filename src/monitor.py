@@ -147,7 +147,7 @@ class MatchMonitor:
         with self._player_lock:
             self._player_id = player.player_id
             self._player_nickname = player.nickname
-        self._reset_match_state()
+            self._reset_match_state()
         self.config.faceit_nickname = player.nickname
         self.discord.clear()
         self._notify_status(f"Tracking {player.nickname}")
@@ -369,11 +369,13 @@ class MatchMonitor:
         score = f"{live_info.score_team1}:{live_info.score_team2}"
         self._notify_status(f"Live: {live_info.map_name} ({score})")
 
-        # Determine FPL status to display
+        # Determine FPL status to display. The API reports e.g. "You do not
+        # participate in FPL" for regular players; an empty field also means
+        # no FPL.
         fpl_status = None
-        if "participate" not in live_info.fpl_status.lower():
+        if live_info.fpl_status and "participate" not in live_info.fpl_status.lower():
             fpl_status = "FPL"
-        elif "participate" not in live_info.fplc_status.lower():
+        elif live_info.fplc_status and "participate" not in live_info.fplc_status.lower():
             fpl_status = "FPL-C"
 
         self.discord.update_live_simple(
