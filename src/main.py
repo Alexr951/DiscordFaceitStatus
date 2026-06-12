@@ -103,12 +103,12 @@ def main() -> int:
         on_notify=tray.notify,
     )
 
-    # Ctrl+C / termination: stop the tray loop; cleanup runs after run() returns.
+    # SIGTERM (e.g. taskkill): unblock the main thread for clean shutdown.
+    # Ctrl+C is handled as KeyboardInterrupt in wait_for_exit() below.
     def signal_handler(sig, frame):
         logger.info(f"Received signal {sig}")
         tray.stop()
 
-    signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
     if not monitor.start():
@@ -116,8 +116,13 @@ def main() -> int:
         return 1
 
     logger.info("Running system tray")
-    tray.run()  # blocks until Exit is chosen
+    tray.run_detached()
+    try:
+        tray.wait_for_exit()  # returns when Exit is chosen
+    except KeyboardInterrupt:
+        logger.info("Interrupted from console")
 
+    tray.stop()
     monitor.stop()  # clears presence, disconnects Discord, joins the thread
     logger.info("Shutdown complete")
     return 0

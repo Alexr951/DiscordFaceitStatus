@@ -40,6 +40,14 @@ def get_map_image(map_name: str) -> str:
     return MAP_IMAGES.get(map_name.lower(), "faceit_logo")
 
 
+def country_flag(country_code: str) -> str:
+    """Two-letter country code to flag emoji ("cn" -> 🇨🇳); "" if invalid."""
+    code = country_code.strip().lower()
+    if len(code) != 2 or not code.isalpha() or not code.isascii():
+        return ""
+    return "".join(chr(0x1F1E6 + ord(c) - ord("a")) for c in code)
+
+
 def format_elo_at_stake(elo_at_stake: str) -> Optional[str]:
     """Format the third-party API's "+25/-25" ELO-at-stake string for display.
 
@@ -164,6 +172,9 @@ class DiscordRPC:
         self,
         match: MatchInfo,
         player_stats: Optional[MatchPlayer] = None,
+        current_elo: Optional[int] = None,
+        region_rank: Optional[int] = None,
+        country_flag: Optional[str] = None,
         show_map: bool = True,
         show_avg_elo: bool = True,
         show_kda: bool = True,
@@ -174,12 +185,15 @@ class DiscordRPC:
         Args:
             match: Match information
             player_stats: Player's current stats
+            current_elo: Player's current ELO (None to omit)
+            region_rank: Player's regional ranking position (None to omit)
+            country_flag: Flag emoji for the player's country (None to omit)
             show_map: Whether to show map name
             show_avg_elo: Whether to show average ELO
             show_kda: Whether to show K/D/A stats
             show_score: Whether to show round score
         """
-        # Build details line: "de_mirage | 8 - 5"
+        # Build details line: "de_mirage | 8 - 5 | ELO: 2,010"
         parts = []
         if show_map and match.map_name != "Unknown":
             parts.append(match.map_name)
@@ -192,14 +206,23 @@ class DiscordRPC:
                 score = f"{match.team2_score} - {match.team1_score}"
             parts.append(score)
 
+        if current_elo:
+            parts.append(f"ELO: {current_elo:,}")
+
         details = " | ".join(parts) if parts else "In Match"
 
-        # Build state line: "K/D/A: 15/8/3 | Avg ELO: 2150"
+        # Build state line: "K/D/A: 15/8/3 | 🇨🇳 Rank #6,264 | Avg ELO: 2150"
         state_parts = []
 
         if show_kda and player_stats:
             kda = f"{player_stats.kills}/{player_stats.deaths}/{player_stats.assists}"
             state_parts.append(f"K/D/A: {kda}")
+
+        if region_rank:
+            prefix = f"{country_flag} " if country_flag else ""
+            state_parts.append(f"{prefix}Rank #{region_rank:,}")
+        elif country_flag:
+            state_parts.append(country_flag)
 
         if show_avg_elo and match.avg_elo > 0:
             state_parts.append(f"Avg ELO: {match.avg_elo}")

@@ -58,6 +58,8 @@ class PlayerInfo:
     skill_level: int
     avatar_url: str
     steam_id: str = ""  # Steam64 ID the Faceit account is linked to
+    region: str = ""  # e.g. "EU", "NA"
+    country: str = ""  # two-letter country code
 
 
 @dataclass
@@ -168,9 +170,11 @@ class FaceitAPI:
         self._lcrypt_failures = 0
         self._lcrypt_disabled_until = 0.0
 
-        # Cache
+        # Caches
         self._player_cache: dict[str, tuple[PlayerInfo, float]] = {}
         self._cache_ttl = 300  # 5 minutes
+        self._rank_cache: dict[str, tuple[Optional[int], float]] = {}
+        self._rank_cache_ttl = 600  # 10 minutes
 
     def _rate_limit(self, host: str = "official") -> None:
         """Ensure we don't exceed rate limits (tracked per host).
@@ -289,7 +293,32 @@ class FaceitAPI:
             skill_level=cs2_data.get("skill_level", 0),
             avatar_url=data.get("avatar", ""),
             steam_id=str(cs2_data.get("game_player_id", "") or ""),
+            region=cs2_data.get("region", ""),
+            country=data.get("country", ""),
         )
+
+    def get_region_rank(self, player_id: str, region: str) -> Optional[int]:
+        """Player's position in the regional ELO ranking (cached 10 minutes).
+
+        Returns None when the region is unknown or the lookup fails - the
+        presence simply omits the rank in that case.
+        """
+        if not region:
+            return None
+        cached = self._rank_cache.get(player_id)
+        if cached and time.time() - cached[1] < self._rank_cache_ttl:
+            return cached[0]
+        try:
+            data = self._request(
+                f"/rankings/games/{CS2_GAME_ID}/regions/{region}/players/{player_id}",
+                {"limit": 1},
+            )
+            position = data.get("position") or None
+        except FaceitAPIError as e:
+            logger.debug(f"Region rank unavailable: {e}")
+            position = None
+        self._rank_cache[player_id] = (position, time.time())
+        return position
 
     def get_live_match_info(self, nickname: str) -> Optional[LiveMatchInfo]:
         """Get live match info from third-party API.

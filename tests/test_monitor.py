@@ -11,6 +11,7 @@ def make_player(nickname="tester", player_id="p1", steam_id="STEAM_LOCAL"):
     return PlayerInfo(
         player_id=player_id, nickname=nickname, elo=1450,
         skill_level=6, avatar_url="", steam_id=steam_id,
+        region="NA", country="cn",
     )
 
 
@@ -69,6 +70,9 @@ class FakeAPI:
             raise FaceitAPIError("Resource not found")
         return self.players_by_steam[steam_id64]
 
+    def get_region_rank(self, player_id, region):
+        return getattr(self, "region_rank", None)
+
 
 class FakeRPC:
     def __init__(self):
@@ -93,6 +97,7 @@ class FakeRPC:
 
     def update_live(self, match, **kwargs):
         self.updates.append(("live", match))
+        self.live_kwargs = kwargs
 
     def update_finished(self, match, **kwargs):
         self.updates.append(("finished", match))
@@ -204,6 +209,19 @@ def test_match_url_cached_for_tray(tmp_path):
 
     api.details.clear()  # cached URL must not trigger a new API call
     assert monitor.get_current_match_url() == "https://faceit.com/en/match/m1"
+
+
+def test_official_live_includes_player_stats(tmp_path):
+    monitor, api, rpc = make_monitor(tmp_path)
+    monitor._player = make_player()  # normally set by _ensure_player
+    api.region_rank = 6264
+    api.ongoing = "m1"
+    api.details["m1"] = make_match("m1", status="ONGOING")
+
+    monitor._check_match()
+    assert rpc.live_kwargs["current_elo"] == 1450
+    assert rpc.live_kwargs["region_rank"] == 6264
+    assert rpc.live_kwargs["country_flag"] == "\U0001f1e8\U0001f1f3"
 
 
 # --- Steam ownership verification -----------------------------------------

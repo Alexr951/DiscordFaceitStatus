@@ -2,6 +2,8 @@
 
 import logging
 import sys
+import threading
+import time
 import webbrowser
 from pathlib import Path
 from typing import Callable, Optional, TYPE_CHECKING
@@ -35,6 +37,7 @@ class SystemTray:
 
         self._status = "Starting..."
         self._icon: Optional[pystray.Icon] = None
+        self._exit_event = threading.Event()
 
     def _create_icon_image(self) -> Image.Image:
         """Load the tray icon (bundled in _MEIPASS when frozen)."""
@@ -115,6 +118,7 @@ class SystemTray:
     def _exit(self, icon: pystray.Icon, item: MenuItem) -> None:
         logger.info("Exit requested from tray")
         icon.stop()
+        self._exit_event.set()
 
     def update_status(self, status: str) -> None:
         """Update the status line shown in the tray menu."""
@@ -130,16 +134,28 @@ class SystemTray:
             except Exception as e:
                 logger.debug(f"Toast notification failed: {e}")
 
-    def run(self) -> None:
-        """Run the tray icon on the calling thread (blocks until Exit)."""
+    def run_detached(self) -> None:
+        """Run the tray icon on its own thread.
+
+        The main thread must NOT host the Win32 message loop: while blocked
+        in it, Ctrl+C handlers only fire when the menu wakes the loop. The
+        main thread waits in wait_for_exit() instead, which Ctrl+C can
+        interrupt immediately.
+        """
         self._icon = pystray.Icon(
             "Faceit Discord Status",
             self._create_icon_image(),
             "Faceit Discord Status",
             self._create_menu(),
         )
-        self._icon.run()
+        self._icon.run_detached()
+
+    def wait_for_exit(self) -> None:
+        """Block the calling thread until Exit is chosen (Ctrl+C friendly)."""
+        while not self._exit_event.is_set():
+            time.sleep(0.2)
 
     def stop(self) -> None:
+        self._exit_event.set()
         if self._icon:
             self._icon.stop()

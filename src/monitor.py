@@ -7,7 +7,7 @@ from typing import Callable, Optional
 
 from . import steam
 from .config import Config
-from .discord_rpc import DiscordRPC
+from .discord_rpc import DiscordRPC, country_flag
 from .faceit_api import (
     FaceitAPI,
     FaceitAPIError,
@@ -56,6 +56,7 @@ class MatchMonitor:
         self._player_lock = threading.Lock()
         self._player_id: Optional[str] = None
         self._player_nickname: str = config.faceit_nickname
+        self._player: Optional[PlayerInfo] = None
 
         # Match state
         self._in_live_match = False
@@ -173,6 +174,7 @@ class MatchMonitor:
         with self._player_lock:
             self._player_id = player.player_id
             self._player_nickname = player.nickname
+            self._player = player
             self._reset_match_state()
         self.config.faceit_nickname = player.nickname
         self.discord.clear()
@@ -268,6 +270,7 @@ class MatchMonitor:
         with self._player_lock:
             self._player_id = player.player_id
             self._player_nickname = player.nickname
+            self._player = player
         self._notified_player_error = False
         self._notified_mismatch = False
         self._notify_status(f"Tracking {player.nickname}")
@@ -342,6 +345,19 @@ class MatchMonitor:
             self._resolve_match_url(player_id)
         self._update_live_presence(live_info)
 
+    def _refresh_player_info(self) -> None:
+        """Refresh the tracked player's profile (ELO changes between matches).
+        Served from the API's 5-minute cache when fresh."""
+        with self._player_lock:
+            nickname = self._player_nickname
+        try:
+            player = self.faceit.get_player_by_nickname(nickname)
+        except FaceitAPIError as e:
+            logger.debug(f"Could not refresh player info: {e}")
+            return
+        with self._player_lock:
+            self._player = player
+
     def _resolve_match_url(self, player_id: str) -> None:
         """Best-effort lookup of the match ID/URL (for the tray's View Match
         and the post-match result). Runs once per match."""
@@ -361,6 +377,7 @@ class MatchMonitor:
             logger.info(f"New match detected: {match.match_id}")
             self._current_match_id = match.match_id
             self._match_url = match.match_url or None
+            self._refresh_player_info()
         if match.status != self._last_match_status:
             logger.info(f"Match status changed: {match.status}")
             self._last_match_status = match.status
@@ -491,14 +508,33 @@ class MatchMonitor:
             player_stats = None
             with self._player_lock:
                 player_id = self._player_id
+                player = self._player
             if show_kda and player_id:
                 player_stats = self.faceit.get_match_stats(match.match_id, player_id)
+
+            # Player stats from the official API (replaces the third-party
+            # live-stats source, which has gone offline)
+            current_elo = None
+            region_rank = None
+            flag = None
+            if player:
+                if self.config.get("show_current_elo", True) and player.elo:
+                    current_elo = player.elo
+                if self.config.get("show_region_rank", True) and player.region:
+                    region_rank = self.faceit.get_region_rank(
+                        player.player_id, player.region
+                    )
+                if self.config.get("show_country", True) and player.country:
+                    flag = country_flag(player.country) or None
 
             score = f"{match.team1_score}-{match.team2_score}"
             self._notify_status(f"Live: {match.map_name} ({score})")
             self.discord.update_live(
                 match,
                 player_stats=player_stats,
+                current_elo=current_elo,
+                region_rank=region_rank,
+                country_flag=flag,
                 show_map=show_map,
                 show_avg_elo=show_avg_elo,
                 show_kda=show_kda,

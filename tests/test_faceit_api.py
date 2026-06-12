@@ -29,11 +29,13 @@ SAMPLE_PLAYER = {
     "player_id": "p-123",
     "nickname": "TestNick",
     "avatar": "https://x/avatar.png",
+    "country": "cn",
     "games": {
         "cs2": {
             "faceit_elo": 1450,
             "skill_level": 6,
             "game_player_id": "76561198000000002",
+            "region": "NA",
         }
     },
 }
@@ -65,6 +67,28 @@ def test_get_player_by_nickname_includes_steam_id():
     api._request = lambda endpoint, params=None: SAMPLE_PLAYER
     player = api.get_player_by_nickname("TestNick")
     assert player.steam_id == "76561198000000002"
+    assert player.region == "NA"
+    assert player.country == "cn"
+
+
+def test_get_region_rank_parses_and_caches():
+    api = FaceitAPI("key")
+    calls = []
+
+    def fake_request(endpoint, params=None):
+        calls.append(endpoint)
+        return {"position": 6264, "items": []}
+
+    api._request = fake_request
+    assert api.get_region_rank("p-123", "NA") == 6264
+    assert api.get_region_rank("p-123", "NA") == 6264  # served from cache
+    assert len(calls) == 1
+    assert "/rankings/games/cs2/regions/NA/players/p-123" in calls[0]
+
+
+def test_get_region_rank_handles_missing_region():
+    api = FaceitAPI("key")
+    assert api.get_region_rank("p-123", "") is None
 
 
 def test_parse_timestamp_passes_through_int():
