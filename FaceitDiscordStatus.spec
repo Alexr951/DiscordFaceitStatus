@@ -58,7 +58,6 @@ if anaconda_bin:
 # Define data files to include
 datas = [
     (str(project_root / 'assets' / 'tray_icon.png'), 'assets'),
-    (str(project_root / '.env.example'), '.'),
 ]
 
 # Hidden imports that PyInstaller might miss

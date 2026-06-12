@@ -105,37 +105,25 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Create minimal .env file (API keys are embedded in the exe)
-echo.
-echo Creating configuration file...
-(
-echo # Faceit Discord Status Configuration
-echo # Enter your FACEIT username below, or leave empty to be prompted on first run
-echo FACEIT_NICKNAME=
-) > "dist\.env"
-echo Created .env file - user will be prompted for username on first run
-
 REM Create a README for the dist folder
 echo.
 echo Creating distribution README...
 (
-echo Faceit Discord Status - Standalone Executable
-echo ==============================================
+echo Faceit Discord Status
+echo =====================
 echo.
 echo QUICK START:
 echo.
 echo 1. Run FaceitDiscordStatus.exe
-echo 2. Enter your FACEIT username when prompted ^(case-sensitive^)
-echo 3. Done! The app will appear in your system tray.
+echo 2. Type your FACEIT nickname into the setup window ^(case-sensitive^)
+echo 3. Done! The app lives in your system tray ^(near the clock^).
 echo.
-echo Right-click the tray icon to access settings and controls.
+echo Right-click the tray icon for settings:
+echo - Settings... : change nickname and what shows in Discord
+echo - Start with Windows : launch automatically on boot
+echo - View Current Match : open your match page on Faceit
 echo.
-echo TO CHANGE USERNAME LATER:
-echo Right-click tray icon ^> "Change FACEIT Username..."
-echo.
-echo NOTES:
-echo - A config.json file will be created for your preferences
-echo - Logs are stored in a 'logs' folder
+echo Your settings and logs are stored in %%APPDATA%%\FaceitDiscordStatus
 ) > "dist\README.txt"
 
 echo.
@@ -145,9 +133,6 @@ echo ========================================
 echo.
 echo Output: dist\FaceitDiscordStatus.exe
 echo.
-echo API keys are embedded in the executable.
-echo Your friend will be prompted for their FACEIT username on first run.
-echo.
-echo To share: Send the 'dist' folder to your friend.
+echo Share dist\FaceitDiscordStatus.exe - it is fully self-contained.
 echo.
 pause
