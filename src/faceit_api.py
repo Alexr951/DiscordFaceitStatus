@@ -1,8 +1,10 @@
 """Faceit API client for fetching match and player data."""
 
 import logging
+import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 import requests
@@ -11,11 +13,26 @@ logger = logging.getLogger(__name__)
 
 # Faceit API base URLs
 BASE_URL = "https://open.faceit.com/data/v4"
-MATCH_HISTORY_URL = "https://api.faceit.com/match-history/v5"
 THIRD_PARTY_API_URL = "https://faceit.lcrypt.eu"
 
 # CS2 game ID on Faceit
 CS2_GAME_ID = "cs2"
+
+
+def parse_timestamp(value) -> Optional[int]:
+    """Normalize a Faceit timestamp (unix int or ISO 8601 string) to a unix int."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(
+                datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+            )
+        except ValueError:
+            return None
+    return None
 
 
 @dataclass
@@ -123,20 +140,23 @@ class FaceitAPI:
             "Accept": "application/json",
         })
 
-        # Rate limiting
-        self._last_request_time = 0
-        self._min_request_interval = 1.0  # seconds between requests
+        # Rate limiting (per host, guarded for cross-thread use)
+        self._rate_lock = threading.Lock()
+        self._last_request_time: dict[str, float] = {}
+        self._min_request_interval = 1.0  # seconds between requests per host
+        self._lcrypt_warned = False
 
         # Cache
         self._player_cache: dict[str, tuple[PlayerInfo, float]] = {}
         self._cache_ttl = 300  # 5 minutes
 
-    def _rate_limit(self) -> None:
-        """Ensure we don't exceed rate limits."""
-        elapsed = time.time() - self._last_request_time
-        if elapsed < self._min_request_interval:
-            time.sleep(self._min_request_interval - elapsed)
-        self._last_request_time = time.time()
+    def _rate_limit(self, host: str = "official") -> None:
+        """Ensure we don't exceed rate limits (tracked per host)."""
+        with self._rate_lock:
+            elapsed = time.time() - self._last_request_time.get(host, 0)
+            if elapsed < self._min_request_interval:
+                time.sleep(self._min_request_interval - elapsed)
+            self._last_request_time[host] = time.time()
 
     def _request(self, endpoint: str, params: Optional[dict] = None) -> dict:
         """Make a request to the Faceit API.
@@ -236,7 +256,7 @@ class FaceitAPI:
             LiveMatchInfo if in live match, None otherwise
         """
         try:
-            self._rate_limit()
+            self._rate_limit("lcrypt")
             url = f"{THIRD_PARTY_API_URL}/?n={nickname}"
             response = requests.get(url, timeout=10)
 
@@ -312,127 +332,36 @@ class FaceitAPI:
             )
 
             logger.debug(f"[third-party] Found live match: {live_info.map_name} ({score_team1}:{score_team2})")
+            self._lcrypt_warned = False
             return live_info
 
         except Exception as e:
-            logger.debug(f"[third-party] Error: {e}")
+            if not self._lcrypt_warned:
+                self._lcrypt_warned = True
+                logger.warning(
+                    f"Live match API unavailable, falling back to official API: {e}"
+                )
+            else:
+                logger.debug(f"[third-party] Error: {e}")
             return None
 
     def get_ongoing_match(self, player_id: str) -> Optional[str]:
-        """Check if player is in an ongoing match.
+        """Return the player's active match ID, or None.
 
-        Args:
-            player_id: Faceit player ID
-
-        Returns:
-            Match ID if in match, None otherwise
+        Raises:
+            FaceitAPIError: If the request fails. Callers rely on this to
+                distinguish "definitely no match" from a transient API error,
+                so a hiccup doesn't wipe the presence.
         """
-        try:
-            # First, check if player endpoint has active_match info
-            data = self._request(f"/players/{player_id}")
-
-            # Log all top-level keys to see what's available
-            logger.debug(f"Player endpoint keys: {list(data.keys())}")
-
-            # Check for various possible ongoing match fields
-            if "active_match_id" in data:
-                logger.debug(f"Found active_match_id: {data['active_match_id']}")
-                return data["active_match_id"]
-
-            if "ongoing_match" in data:
-                logger.debug(f"Found ongoing_match: {data['ongoing_match']}")
-                return data["ongoing_match"].get("match_id") if isinstance(data["ongoing_match"], dict) else data["ongoing_match"]
-
-            if "current_match" in data:
-                logger.debug(f"Found current_match: {data['current_match']}")
-                return data["current_match"]
-
-            # Fallback: Check player's recent matches for ongoing ones
-            return self._check_recent_matches_for_ongoing(player_id)
-
-        except FaceitAPIError as e:
-            logger.warning(f"Failed to check ongoing match: {e}")
-            return None
-
-    def _check_recent_matches_for_ongoing(self, player_id: str) -> Optional[str]:
-        """Check recent matches for an ongoing one.
-
-        Args:
-            player_id: Faceit player ID
-
-        Returns:
-            Match ID if found, None otherwise
-        """
-        # Try v5 match history API first (may include ongoing matches)
-        match_id = self._check_v5_match_history(player_id)
-        if match_id:
-            return match_id
-
-        # Fallback to v4 API
-        try:
-            data = self._request(
-                f"/players/{player_id}/history",
-                {"game": CS2_GAME_ID, "limit": 5}
-            )
-
-            items = data.get("items", [])
-            logger.debug(f"[v4] Found {len(items)} recent matches")
-
-            for match in items:
-                status = match.get("status", "")
-                match_id = match.get("match_id", "")
-                logger.debug(f"[v4] Match {match_id}: status={status}")
-                if status.upper() in ("READY", "ONGOING", "VOTING", "CONFIGURING"):
-                    logger.debug(f"[v4] Found active match: {match_id}")
-                    return match_id
-
-            logger.debug("[v4] No active match found in recent history")
-            return None
-
-        except FaceitAPIError as e:
-            logger.debug(f"[v4] Error checking recent matches: {e}")
-            return None
-
-    def _check_v5_match_history(self, player_id: str) -> Optional[str]:
-        """Check v5 match history API for ongoing matches.
-
-        Args:
-            player_id: Faceit player ID
-
-        Returns:
-            Match ID if found, None otherwise
-        """
-        try:
-            self._rate_limit()
-            url = f"{MATCH_HISTORY_URL}/players/{player_id}/history"
-            response = self.session.get(
-                url,
-                params={"page": 0, "size": 10},
-                timeout=10
-            )
-
-            if response.status_code != 200:
-                logger.debug(f"[v5] API returned status {response.status_code}")
-                return None
-
-            data = response.json()
-            matches = data.get("payload", [])
-            logger.debug(f"[v5] Found {len(matches)} recent matches")
-
-            for match in matches:
-                status = match.get("status", "")
-                match_id = match.get("matchId", "") or match.get("match_id", "")
-                logger.debug(f"[v5] Match {match_id}: status={status}")
-                if status.upper() in ("READY", "ONGOING", "VOTING", "CONFIGURING", "LIVE"):
-                    logger.debug(f"[v5] Found active match: {match_id}")
-                    return match_id
-
-            logger.debug("[v5] No active match found")
-            return None
-
-        except Exception as e:
-            logger.debug(f"[v5] Error: {e}")
-            return None
+        data = self._request(
+            f"/players/{player_id}/history",
+            {"game": CS2_GAME_ID, "limit": 5},
+        )
+        for match in data.get("items", []):
+            status = match.get("status", "").upper()
+            if status in ("READY", "ONGOING", "VOTING", "CONFIGURING", "LIVE"):
+                return match.get("match_id") or None
+        return None
 
     def get_match_details(self, match_id: str, player_id: str) -> MatchInfo:
         """Get detailed match information.
@@ -494,19 +423,9 @@ class FaceitAPI:
         team1_score = int(score.get("faction1", 0) or 0)
         team2_score = int(score.get("faction2", 0) or 0)
 
-        # Get timestamps
-        started_at = data.get("started_at")
-        finished_at = data.get("finished_at")
-
-        # Convert ISO string to timestamp if needed
-        if isinstance(started_at, str):
-            try:
-                from datetime import datetime
-                started_at = int(datetime.fromisoformat(
-                    started_at.replace("Z", "+00:00")
-                ).timestamp())
-            except (ValueError, AttributeError):
-                started_at = None
+        # Get timestamps (API may return unix ints or ISO strings)
+        started_at = parse_timestamp(data.get("started_at"))
+        finished_at = parse_timestamp(data.get("finished_at"))
 
         return MatchInfo(
             match_id=match_id,
