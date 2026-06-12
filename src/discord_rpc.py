@@ -10,6 +10,53 @@ from .faceit_api import MatchInfo, MatchPlayer
 
 logger = logging.getLogger(__name__)
 
+# Discord asset keys for CS2 maps. Supports both official names (de_mirage)
+# and display names (Mirage, Dust II). These must be uploaded to the Discord app.
+MAP_IMAGES = {
+    "de_mirage": "map_mirage",
+    "mirage": "map_mirage",
+    "de_inferno": "map_inferno",
+    "inferno": "map_inferno",
+    "de_dust2": "map_dust2",
+    "dust2": "map_dust2",
+    "dust ii": "map_dust2",
+    "de_nuke": "map_nuke",
+    "nuke": "map_nuke",
+    "de_overpass": "map_overpass",
+    "overpass": "map_overpass",
+    "de_ancient": "map_ancient",
+    "ancient": "map_ancient",
+    "de_anubis": "map_anubis",
+    "anubis": "map_anubis",
+    "de_vertigo": "map_vertigo",
+    "vertigo": "map_vertigo",
+    "de_train": "map_train",
+    "train": "map_train",
+}
+
+
+def get_map_image(map_name: str) -> str:
+    """Get the Discord asset key for a CS2 map, falling back to the Faceit logo."""
+    return MAP_IMAGES.get(map_name.lower(), "faceit_logo")
+
+
+def format_elo_at_stake(elo_at_stake: str) -> Optional[str]:
+    """Format the third-party API's "+25/-25" ELO-at-stake string for display.
+
+    Returns "±25" when gain and loss match, the raw "+30/-20" when asymmetric,
+    or None when there is nothing to show.
+    """
+    if not elo_at_stake:
+        return None
+    parts = [p.strip() for p in elo_at_stake.split("/")]
+    gain = parts[0] if parts and parts[0] else ""
+    loss = parts[1] if len(parts) > 1 and parts[1] else ""
+    if gain and loss:
+        if gain.lstrip("+") == loss.lstrip("-"):
+            return f"±{gain.lstrip('+')}"
+        return f"{gain}/{loss}"
+    return gain or loss or None
+
 
 class DiscordRPC:
     """Handles Discord Rich Presence updates."""
@@ -20,6 +67,7 @@ class DiscordRPC:
         self.connected = False
         self._last_update_time = 0
         self._min_update_interval = 15  # Discord rate limit
+        self._presence_set = False
 
     def connect(self) -> bool:
         """Connect to Discord RPC.
@@ -67,9 +115,12 @@ class DiscordRPC:
         """Clear the current presence."""
         if not self.connected or not self.rpc:
             return
+        if not self._presence_set:
+            return
 
         try:
             self.rpc.clear()
+            self._presence_set = False
             logger.debug("Cleared Discord presence")
         except PipeClosed:
             logger.warning("Discord connection lost")
@@ -101,7 +152,7 @@ class DiscordRPC:
         self._update(
             details=details,
             state=state,
-            large_image=self._get_map_image(match.map_name),
+            large_image=get_map_image(match.map_name),
             large_text=match.map_name if match.map_name != "Unknown" else "Faceit CS2",
             small_image="faceit_logo",
             small_text="Faceit CS2",
@@ -160,7 +211,7 @@ class DiscordRPC:
         self._update(
             details=details,
             state=state,
-            large_image=self._get_map_image(match.map_name),
+            large_image=get_map_image(match.map_name),
             large_text=match.map_name if match.map_name != "Unknown" else "Faceit CS2",
             small_image="faceit_logo",
             small_text="Faceit CS2",
@@ -207,7 +258,7 @@ class DiscordRPC:
         self._update(
             details=details,
             state=state,
-            large_image=self._get_map_image(match.map_name),
+            large_image=get_map_image(match.map_name),
             large_text=match.map_name if match.map_name != "Unknown" else "Faceit CS2",
             small_image="faceit_logo",
             small_text="Faceit CS2",
@@ -226,6 +277,7 @@ class DiscordRPC:
         region_rank: Optional[int] = None,
         today_elo: Optional[str] = None,
         fpl_status: Optional[str] = None,
+        match_start: Optional[int] = None,
         show_elo: bool = True,
         show_score: bool = True,
         show_current_elo: bool = True,
@@ -272,8 +324,9 @@ class DiscordRPC:
         if show_today_elo and today_elo:
             state_parts.append(f"{today_elo} today")
 
-        if show_elo and elo_at_stake:
-            state_parts.append(f"±{elo_at_stake.replace('+', '').replace('-', '').split('/')[0]}")
+        formatted_stake = format_elo_at_stake(elo_at_stake) if elo_at_stake else None
+        if show_elo and formatted_stake:
+            state_parts.append(formatted_stake)
 
         if server:
             state_parts.append(server)
@@ -288,11 +341,11 @@ class DiscordRPC:
         self._update(
             details=details,
             state=state,
-            large_image=self._get_map_image(map_name or ""),
+            large_image=get_map_image(map_name or ""),
             large_text=large_text,
             small_image="faceit_logo",
             small_text=queue_name or "Faceit CS2",
-            start=int(time.time()),
+            start=match_start,
         )
 
     def _update(
@@ -345,6 +398,7 @@ class DiscordRPC:
                 kwargs["buttons"] = buttons[:2]
 
             self.rpc.update(**kwargs)
+            self._presence_set = True
             self._last_update_time = now
             logger.debug(f"Updated presence: {details} | {state}")
 
@@ -353,38 +407,3 @@ class DiscordRPC:
             self.connected = False
         except Exception as e:
             logger.error(f"Failed to update presence: {e}")
-
-    def _get_map_image(self, map_name: str) -> str:
-        """Get the image key for a CS2 map.
-
-        Note: These image keys need to be uploaded to your Discord app.
-
-        Args:
-            map_name: Map name (e.g., "de_mirage" or "Mirage")
-
-        Returns:
-            Image key for Discord
-        """
-        # Map names to image keys (you'll need to upload these to Discord)
-        # Supports both official names (de_mirage) and display names (Mirage, Dust II)
-        map_images = {
-            "de_mirage": "map_mirage",
-            "mirage": "map_mirage",
-            "de_inferno": "map_inferno",
-            "inferno": "map_inferno",
-            "de_dust2": "map_dust2",
-            "dust2": "map_dust2",
-            "dust ii": "map_dust2",
-            "de_nuke": "map_nuke",
-            "nuke": "map_nuke",
-            "de_overpass": "map_overpass",
-            "overpass": "map_overpass",
-            "de_ancient": "map_ancient",
-            "ancient": "map_ancient",
-            "de_anubis": "map_anubis",
-            "anubis": "map_anubis",
-            "de_vertigo": "map_vertigo",
-            "vertigo": "map_vertigo",
-        }
-
-        return map_images.get(map_name.lower(), "faceit_logo")
