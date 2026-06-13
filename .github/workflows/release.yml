@@ -26,7 +26,7 @@ jobs:
       - name: Build executable
         run: pyinstaller FaceitDiscordStatus.spec --clean
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/FaceitDiscordStatus.exe
           generate_release_notes: true
