@@ -1,0 +1,32 @@
+name: Release
+
+# Tag a version to publish a release with the built exe:
+#   git tag v2.0.0 && git push origin v2.0.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+      - name: Run tests
+        run: |
+          pip install pytest
+          python -m pytest tests/ -v
+      - name: Build executable
+        run: pyinstaller FaceitDiscordStatus.spec --clean
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/FaceitDiscordStatus.exe
+          generate_release_notes: true

@@ -221,7 +221,7 @@ def test_official_live_includes_player_stats(tmp_path):
     monitor._check_match()
     assert rpc.live_kwargs["current_elo"] == 1450
     assert rpc.live_kwargs["region_rank"] == 6264
-    assert rpc.live_kwargs["country_flag"] == "\U0001f1e8\U0001f1f3"
+    assert rpc.live_kwargs["region"] == "NA"
 
 
 # --- Steam ownership verification -----------------------------------------
@@ -235,6 +235,17 @@ def make_unresolved_monitor(tmp_path, nickname, local_steam="STEAM_LOCAL"):
     monitor.discord = FakeRPC()
     monitor._local_steam = lambda: local_steam
     return monitor, api
+
+
+def test_ensure_player_prefers_steam_over_stale_config(tmp_path):
+    # Config still says "doinker" (old/stale); Steam login resolves directly.
+    monitor, api = make_unresolved_monitor(tmp_path, "doinker")
+    api.players_by_steam["STEAM_LOCAL"] = make_player("Ranch-", "p-ranch", "STEAM_LOCAL")
+    # note: "doinker" is NOT in api.players - the nickname is never looked up
+
+    assert monitor._ensure_player() is True
+    assert monitor._player_nickname == "Ranch-"
+    assert monitor.config.faceit_nickname == "Ranch-"  # stale config healed
 
 
 def test_ensure_player_passes_for_own_account(tmp_path):

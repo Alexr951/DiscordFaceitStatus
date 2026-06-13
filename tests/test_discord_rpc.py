@@ -1,17 +1,6 @@
 """Tests for Discord presence formatting helpers."""
 
-from src.discord_rpc import country_flag, format_elo_at_stake, get_map_image
-
-
-def test_country_flag_known():
-    assert country_flag("cn") == "\U0001f1e8\U0001f1f3"
-    assert country_flag("PL") == "\U0001f1f5\U0001f1f1"
-
-
-def test_country_flag_invalid():
-    assert country_flag("") == ""
-    assert country_flag("xyz") == ""
-    assert country_flag("1a") == ""
+from src.discord_rpc import format_elo_at_stake, get_map_image
 
 
 def test_map_lookup_known():

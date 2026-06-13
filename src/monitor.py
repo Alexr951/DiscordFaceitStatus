@@ -7,7 +7,7 @@ from typing import Callable, Optional
 
 from . import steam
 from .config import Config
-from .discord_rpc import DiscordRPC, country_flag
+from .discord_rpc import DiscordRPC
 from .faceit_api import (
     FaceitAPI,
     FaceitAPIError,
@@ -221,11 +221,40 @@ class MatchMonitor:
             self._stop_event.wait(interval)
 
     def _ensure_player(self) -> bool:
-        """Resolve the configured nickname to a player ID, retrying each poll."""
+        """Resolve who to track, retrying each poll until it succeeds.
+
+        The Steam login is the source of truth: when it resolves to a Faceit
+        account, that account is used directly and the stored nickname is just
+        a cache (stale config heals itself). The configured nickname is only
+        the fallback when Steam can't identify the player.
+        """
         with self._player_lock:
             if self._player_id:
                 return True
             nickname = self.config.faceit_nickname
+
+        local = self._local_steam()
+        if local:
+            try:
+                player = self.faceit.get_player_by_steam_id(local)
+                with self._player_lock:
+                    self._player_id = player.player_id
+                    self._player_nickname = player.nickname
+                    self._player = player
+                if player.nickname != nickname:
+                    logger.info(
+                        f"Steam login resolved to '{player.nickname}' "
+                        f"(config said '{nickname or '<unset>'}')"
+                    )
+                    self.config.faceit_nickname = player.nickname
+                self._notified_player_error = False
+                self._notified_mismatch = False
+                self._notify_status(f"Tracking {player.nickname}")
+                logger.info(f"Found player: {player.nickname} (ELO: {player.elo})")
+                return True
+            except FaceitAPIError as e:
+                logger.debug(f"No Faceit account for local Steam login: {e}")
+
         try:
             player = self.faceit.get_player_by_nickname(nickname)
         except FaceitAPIError as e:
@@ -516,7 +545,6 @@ class MatchMonitor:
             # live-stats source, which has gone offline)
             current_elo = None
             region_rank = None
-            flag = None
             if player:
                 if self.config.get("show_current_elo", True) and player.elo:
                     current_elo = player.elo
@@ -524,8 +552,6 @@ class MatchMonitor:
                     region_rank = self.faceit.get_region_rank(
                         player.player_id, player.region
                     )
-                if self.config.get("show_country", True) and player.country:
-                    flag = country_flag(player.country) or None
 
             score = f"{match.team1_score}-{match.team2_score}"
             self._notify_status(f"Live: {match.map_name} ({score})")
@@ -534,7 +560,7 @@ class MatchMonitor:
                 player_stats=player_stats,
                 current_elo=current_elo,
                 region_rank=region_rank,
-                country_flag=flag,
+                region=player.region if player else None,
                 show_map=show_map,
                 show_avg_elo=show_avg_elo,
                 show_kda=show_kda,

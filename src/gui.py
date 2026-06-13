@@ -12,17 +12,17 @@ from .faceit_api import FaceitAPI, FaceitAPIError
 
 logger = logging.getLogger(__name__)
 
+# Settings the user can toggle. show_country / show_today_elo / show_fpl
+# still exist in config but are hidden here: their data source (the
+# third-party live-stats API) is offline, so toggling them does nothing.
 DISPLAY_OPTIONS = [
     ("show_map", "Map name"),
     ("show_score", "Round score"),
-    ("show_elo", "ELO at stake"),
-    ("show_avg_elo", "Average lobby ELO"),
-    ("show_kda", "K/D/A stats"),
     ("show_current_elo", "Current ELO"),
-    ("show_country", "Country flag"),
     ("show_region_rank", "Regional rank"),
-    ("show_today_elo", "Today's ELO change"),
-    ("show_fpl", "FPL / FPL-C status"),
+    ("show_kda", "K/D/A stats"),
+    ("show_avg_elo", "Average lobby ELO"),
+    ("show_elo", "ELO change after match"),
 ]
 
 

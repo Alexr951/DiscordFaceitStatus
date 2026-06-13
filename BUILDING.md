@@ -8,7 +8,7 @@
 ## Run from source
 
 ```bash
-git clone https://github.com/yourusername/DiscordFaceitStatus.git
+git clone https://github.com/Alexr951/DiscordFaceitStatus.git
 cd DiscordFaceitStatus
 pip install -r requirements.txt
 python run.py          # add --debug for verbose logging

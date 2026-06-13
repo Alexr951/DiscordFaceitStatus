@@ -1,10 +1,12 @@
 # Faceit Discord Status
 
-Show your live **Faceit CS2 match** in your **Discord status** — map, score, ELO and more, updating automatically while you play.
+[![CI](https://github.com/Alexr951/DiscordFaceitStatus/actions/workflows/ci.yml/badge.svg)](https://github.com/Alexr951/DiscordFaceitStatus/actions/workflows/ci.yml)
+
+Show your live **Faceit CS2 match** in your **Discord status** — map, score, ELO and rank, updating automatically while you play.
 
 ## Setup (under a minute, nothing to configure)
 
-1. **Download** `FaceitDiscordStatus.exe` from the [latest release](https://github.com/yourusername/DiscordFaceitStatus/releases).
+1. **Download** `FaceitDiscordStatus.exe` from the [latest release](https://github.com/Alexr951/DiscordFaceitStatus/releases/latest).
 2. **Run it.** It finds your Faceit account automatically through your Steam login and shows it to you — just click **Save & Start**.
 3. **Let Discord show it** (one-time): in Discord go to **User Settings → Activity Privacy** and turn on **"Share your detected activities with others"**.
 4. **That's it.** The app lives in your system tray (next to the clock). Play a Faceit match and your Discord status updates by itself.
@@ -13,9 +15,14 @@ Show your live **Faceit CS2 match** in your **Discord status** — map, score, E
 
 ## What it shows
 
-- Current map, live score, and match ELO at stake
-- Your current ELO, regional rank, and today's ELO gains/losses
-- K/D/A and average lobby ELO
+While you're in a match:
+
+> **de_anubis | 6 - 7 | ELO: 2,010**
+> **NA Rank #6,264** · *12:34 elapsed* · map art
+
+- Current map, live score, and elapsed match time
+- Your current ELO and regional rank
+- Average lobby ELO and K/D/A (when Faceit provides them)
 - Win/loss result with ELO change after the match
 - A "View Match" button linking to the Faceit match page
 
