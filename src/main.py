@@ -49,6 +49,11 @@ def parse_test_arg(argv: list[str]) -> tuple[bool, str]:
 def main() -> int:
     """Main entry point. Returns the process exit code."""
     test_mode, test_nick = parse_test_arg(sys.argv)
+    if getattr(sys, "frozen", False):
+        # Test mode bypasses the Steam identity check, so the packaged exe
+        # ignores it - otherwise anyone could impersonate a pro player by
+        # launching the exe with --test <name>.
+        test_mode, test_nick = False, ""
     setup_logging(debug="--debug" in sys.argv or test_mode)
     logger.info("Starting Faceit Discord Rich Presence")
 
@@ -92,9 +97,7 @@ def main() -> int:
         config=config,
         on_toggle=on_toggle,
         get_match_url=monitor.get_current_match_url,
-        open_settings=lambda: open_settings_window(
-            config, api, monitor.update_player
-        ),
+        open_settings=lambda: open_settings_window(config),
     )
 
     monitor.set_callbacks(

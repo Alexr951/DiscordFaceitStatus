@@ -224,7 +224,7 @@ def test_official_live_includes_player_stats(tmp_path):
     assert rpc.live_kwargs["region"] == "NA"
 
 
-# --- Steam ownership verification -----------------------------------------
+# --- Steam-only identity (strict: no Steam, no tracking) -------------------
 
 
 def make_unresolved_monitor(tmp_path, nickname, local_steam="STEAM_LOCAL"):
@@ -237,8 +237,8 @@ def make_unresolved_monitor(tmp_path, nickname, local_steam="STEAM_LOCAL"):
     return monitor, api
 
 
-def test_ensure_player_prefers_steam_over_stale_config(tmp_path):
-    # Config still says "doinker" (old/stale); Steam login resolves directly.
+def test_ensure_player_tracks_account_from_steam(tmp_path):
+    # Config still says "doinker" (old/stale); Steam login is authoritative.
     monitor, api = make_unresolved_monitor(tmp_path, "doinker")
     api.players_by_steam["STEAM_LOCAL"] = make_player("Ranch-", "p-ranch", "STEAM_LOCAL")
     # note: "doinker" is NOT in api.players - the nickname is never looked up
@@ -248,64 +248,29 @@ def test_ensure_player_prefers_steam_over_stale_config(tmp_path):
     assert monitor.config.faceit_nickname == "Ranch-"  # stale config healed
 
 
-def test_ensure_player_passes_for_own_account(tmp_path):
-    monitor, api = make_unresolved_monitor(tmp_path, "tester")
-    api.players["tester"] = make_player("tester", steam_id="STEAM_LOCAL")
-    assert monitor._ensure_player() is True
-    assert monitor._player_nickname == "tester"
-
-
-def test_ensure_player_auto_corrects_impersonation(tmp_path):
-    monitor, api = make_unresolved_monitor(tmp_path, "s1mple")
-    api.players["s1mple"] = make_player("s1mple", "p-s1mple", steam_id="STEAM_S1MPLE")
-    api.players_by_steam["STEAM_LOCAL"] = make_player("realguy", "p-real", "STEAM_LOCAL")
-
-    assert monitor._ensure_player() is True
-    assert monitor._player_nickname == "realguy"
-    assert monitor.config.faceit_nickname == "realguy"
-
-
-def test_ensure_player_refuses_unverifiable_mismatch(tmp_path):
-    monitor, api = make_unresolved_monitor(tmp_path, "s1mple")
-    api.players["s1mple"] = make_player("s1mple", "p-s1mple", steam_id="STEAM_S1MPLE")
-    # local Steam has no Faceit account at all
+def test_ensure_player_refuses_without_steam(tmp_path):
+    # No Steam on the machine: no way to verify identity, so refuse outright.
+    monitor, api = make_unresolved_monitor(tmp_path, "anyname", local_steam=None)
+    api.players["anyname"] = make_player("anyname", steam_id="STEAM_OTHER")
 
     assert monitor._ensure_player() is False
     assert monitor._player_id is None
 
 
-def test_ensure_player_honor_system_without_steam(tmp_path):
-    monitor, api = make_unresolved_monitor(tmp_path, "anyname", local_steam=None)
-    api.players["anyname"] = make_player("anyname", steam_id="STEAM_OTHER")
-    assert monitor._ensure_player() is True  # can't verify -> allow
-
-
-def test_update_player_rejects_other_account(tmp_path):
-    monitor, api = make_unresolved_monitor(tmp_path, "tester")
-    api.players["tester"] = make_player("tester", steam_id="STEAM_LOCAL")
-    api.players["s1mple"] = make_player("s1mple", "p-s1mple", steam_id="STEAM_S1MPLE")
-    api.players_by_steam["STEAM_LOCAL"] = api.players["tester"]
-
-    ok, err = monitor.update_player("s1mple")
-    assert ok is False
-    assert "tester" in err  # hint at the user's real account
-
-
-def test_disable_ownership_check_allows_any_account(tmp_path):
+def test_ensure_player_refuses_when_steam_has_no_faceit(tmp_path):
     monitor, api = make_unresolved_monitor(tmp_path, "s1mple")
     api.players["s1mple"] = make_player("s1mple", "p-s1mple", steam_id="STEAM_S1MPLE")
-    # local Steam has no Faceit account -> would normally refuse
+    # players_by_steam is empty: the local Steam has no Faceit account
+
+    assert monitor._ensure_player() is False
+    assert monitor._player_id is None
+
+
+def test_disable_ownership_check_uses_config_nickname(tmp_path):
+    # Dev --test mode only: track the configured nickname directly.
+    monitor, api = make_unresolved_monitor(tmp_path, "s1mple", local_steam=None)
+    api.players["s1mple"] = make_player("s1mple", "p-s1mple", steam_id="STEAM_S1MPLE")
 
     monitor.disable_ownership_check()
     assert monitor._ensure_player() is True
     assert monitor._player_nickname == "s1mple"
-
-
-def test_update_player_accepts_own_account(tmp_path):
-    monitor, api = make_unresolved_monitor(tmp_path, "old")
-    api.players["old"] = make_player("old", steam_id="STEAM_LOCAL")
-    api.players["tester"] = make_player("tester", "p-new", steam_id="STEAM_LOCAL")
-
-    ok, err = monitor.update_player("tester")
-    assert ok is True and err is None
-    assert monitor.config.faceit_nickname == "tester"

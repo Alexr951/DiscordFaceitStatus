@@ -71,10 +71,12 @@ class MatchMonitor:
         self._notified_discord_down = False
         self._notified_player_error = False
         self._notified_api_outage = False
-        self._notified_mismatch = False
 
         # Resolves the locally logged-in Steam account (injectable for tests)
         self._local_steam = steam.get_logged_in_steam64
+        # Strict by default: only the account linked to the local Steam login
+        # may be tracked. Disabled only by dev --test mode.
+        self._ownership_check = True
 
         # Callbacks for UI updates
         self._on_status_change: Optional[Callable[[str], None]] = None
@@ -150,37 +152,9 @@ class MatchMonitor:
         return self._running
 
     def disable_ownership_check(self) -> None:
-        """Test mode: allow tracking any account (skips Steam verification)."""
-        self._local_steam = lambda: None
-
-    def update_player(self, nickname: str) -> tuple[bool, Optional[str]]:
-        """Switch to tracking a different player. Safe to call while running
-        (used by the settings window - no app restart needed)."""
-        try:
-            player = self.faceit.get_player_by_nickname(nickname)
-        except FaceitAPIError as e:
-            return False, str(e)
-        ok, local_player = self._verify_ownership(player)
-        if not ok:
-            hint = (
-                f" Your Steam login is linked to '{local_player.nickname}'."
-                if local_player
-                else ""
-            )
-            return False, (
-                f"'{player.nickname}' isn't linked to the Steam account on "
-                f"this PC.{hint}"
-            )
-        with self._player_lock:
-            self._player_id = player.player_id
-            self._player_nickname = player.nickname
-            self._player = player
-            self._reset_match_state()
-        self.config.faceit_nickname = player.nickname
-        self.discord.clear()
-        self._notify_status(f"Tracking {player.nickname}")
-        logger.info(f"Now tracking {player.nickname}")
-        return True, None
+        """Dev --test mode only: track the configured nickname without Steam
+        verification. Never reachable from the packaged exe."""
+        self._ownership_check = False
 
     # --- monitor loop -----------------------------------------------------
 
@@ -223,105 +197,72 @@ class MatchMonitor:
     def _ensure_player(self) -> bool:
         """Resolve who to track, retrying each poll until it succeeds.
 
-        The Steam login is the source of truth: when it resolves to a Faceit
-        account, that account is used directly and the stored nickname is just
-        a cache (stale config heals itself). The configured nickname is only
-        the fallback when Steam can't identify the player.
+        The Steam login is the only identity source: the tracked account is
+        whatever Faceit account is linked to the Steam user logged in on this
+        PC. No Steam (or no linked Faceit account) means nothing is tracked -
+        there is deliberately no manual-nickname path to impersonate someone.
         """
         with self._player_lock:
             if self._player_id:
                 return True
             nickname = self.config.faceit_nickname
 
-        local = self._local_steam()
-        if local:
+        if not self._ownership_check:
+            # Dev --test mode: track the configured nickname as-is.
             try:
-                player = self.faceit.get_player_by_steam_id(local)
-                with self._player_lock:
-                    self._player_id = player.player_id
-                    self._player_nickname = player.nickname
-                    self._player = player
-                if player.nickname != nickname:
-                    logger.info(
-                        f"Steam login resolved to '{player.nickname}' "
-                        f"(config said '{nickname or '<unset>'}')"
-                    )
-                    self.config.faceit_nickname = player.nickname
-                self._notified_player_error = False
-                self._notified_mismatch = False
-                self._notify_status(f"Tracking {player.nickname}")
-                logger.info(f"Found player: {player.nickname} (ELO: {player.elo})")
-                return True
+                player = self.faceit.get_player_by_nickname(nickname)
             except FaceitAPIError as e:
-                logger.debug(f"No Faceit account for local Steam login: {e}")
+                logger.warning(f"Could not look up player '{nickname}': {e}")
+                self._notify_error(f"Player lookup failed: {e}")
+                return False
+            self._adopt_player(player)
+            return True
 
-        try:
-            player = self.faceit.get_player_by_nickname(nickname)
-        except FaceitAPIError as e:
-            logger.warning(f"Could not look up player '{nickname}': {e}")
+        local = self._local_steam()
+        if not local:
             if not self._notified_player_error:
                 self._notified_player_error = True
                 self._notify_toast(
-                    "Faceit player lookup failed",
-                    f"Couldn't look up '{nickname}'. Check the spelling in "
-                    "Settings, or your internet connection.",
+                    "Steam not found",
+                    "Steam must be installed and logged in for this app to work.",
                 )
-            self._notify_error(f"Player lookup failed: {e}")
+            self._notify_status("Steam not found")
             return False
 
-        ok, local_player = self._verify_ownership(player)
-        if not ok:
-            if local_player:
-                logger.info(
-                    f"'{player.nickname}' is not linked to this PC's Steam - "
-                    f"switching to {local_player.nickname}"
-                )
-                self._notify_toast(
-                    "Account corrected",
-                    f"'{player.nickname}' isn't your Faceit account - now "
-                    f"tracking {local_player.nickname} (matched via your "
-                    "Steam login).",
-                )
-                player = local_player
-                self.config.faceit_nickname = player.nickname
-            else:
-                if not self._notified_mismatch:
-                    self._notified_mismatch = True
+        try:
+            player = self.faceit.get_player_by_steam_id(local)
+        except FaceitAPIError as e:
+            if "not found" in str(e).lower():
+                if not self._notified_player_error:
+                    self._notified_player_error = True
                     self._notify_toast(
-                        "Account mismatch",
-                        f"'{player.nickname}' isn't linked to the Steam "
-                        "account on this PC. Open Settings and use your own "
-                        "nickname.",
+                        "No Faceit account found",
+                        "The Steam account logged in on this PC has no "
+                        "linked Faceit account.",
                     )
-                self._notify_status("Account mismatch - check Settings")
-                return False
+                self._notify_status("No Faceit account for this Steam login")
+            else:
+                logger.warning(f"Faceit lookup failed: {e}")
+                self._notify_status("Faceit lookup failed - retrying")
+            return False
 
+        if player.nickname != nickname:
+            logger.info(
+                f"Steam login resolved to '{player.nickname}' "
+                f"(config said '{nickname or '<unset>'}')"
+            )
+            self.config.faceit_nickname = player.nickname
+        self._adopt_player(player)
+        return True
+
+    def _adopt_player(self, player: PlayerInfo) -> None:
         with self._player_lock:
             self._player_id = player.player_id
             self._player_nickname = player.nickname
             self._player = player
         self._notified_player_error = False
-        self._notified_mismatch = False
         self._notify_status(f"Tracking {player.nickname}")
         logger.info(f"Found player: {player.nickname} (ELO: {player.elo})")
-        return True
-
-    def _verify_ownership(self, player: PlayerInfo) -> tuple[bool, Optional[PlayerInfo]]:
-        """Check that a Faceit account belongs to the Steam login on this PC.
-
-        Returns (ok, local_player). ok=False is a definite mismatch;
-        local_player is the local Steam login's own Faceit account when it
-        could be resolved. When Steam or the account link can't be read, the
-        check passes (honor-system fallback - Rich Presence is client-side
-        and can't be made tamper-proof anyway).
-        """
-        local = self._local_steam()
-        if not local or not player.steam_id or player.steam_id == local:
-            return True, None
-        try:
-            return False, self.faceit.get_player_by_steam_id(local)
-        except FaceitAPIError:
-            return False, None
 
     def _ensure_discord(self) -> bool:
         """Connect to Discord if needed, toasting once when it's not running."""

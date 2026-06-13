@@ -4,7 +4,6 @@ import logging
 import threading
 import tkinter as tk
 from tkinter import ttk
-from typing import Callable, Optional
 
 from . import autostart, steam
 from .config import Config
@@ -26,30 +25,19 @@ DISPLAY_OPTIONS = [
 ]
 
 
-def _validate_nickname(api: FaceitAPI, nickname: str):
-    """Look up a nickname on Faceit. Returns (PlayerInfo, None) or (None, error)."""
-    try:
-        return api.get_player_by_nickname(nickname), None
-    except FaceitAPIError as e:
-        msg = str(e)
-        if "not found" in msg.lower():
-            return None, (
-                f"No Faceit player named '{nickname}' was found. "
-                "Names are case-sensitive."
-            )
-        return None, (
-            f"Couldn't reach Faceit ({msg}). "
-            "Check your internet connection and try again."
-        )
-
-
 class FirstRunWizard:
-    """Asks for the player's Faceit nickname, validating it before saving."""
+    """Detects the player's Faceit account through their Steam login.
+
+    There is deliberately no nickname entry: the account shown in Discord is
+    always the one linked to the Steam user logged in on this PC, so the app
+    can't be used to impersonate someone else.
+    """
 
     def __init__(self, config: Config, api: FaceitAPI):
         self.config = config
         self.api = api
         self.completed = False
+        self.detected_player = None
 
         self.root = tk.Tk()
         self.root.title("Faceit Discord Status - Setup")
@@ -64,19 +52,10 @@ class FirstRunWizard:
             text="Welcome! Let's get your Faceit status into Discord.",
             font=("Segoe UI", 11, "bold"),
         ).grid(column=0, row=0, columnspan=2, sticky="w")
-        ttk.Label(frame, text="Enter your Faceit nickname (case-sensitive):").grid(
-            column=0, row=1, columnspan=2, sticky="w", pady=(12, 4)
-        )
 
-        self.nickname_var = tk.StringVar()
-        self.entry = ttk.Entry(frame, textvariable=self.nickname_var, width=34)
-        self.entry.grid(column=0, row=2, columnspan=2, sticky="we")
-        self.entry.focus_set()
-        self.entry.bind("<Return>", lambda _e: self._save())
-
-        self.status_var = tk.StringVar()
-        ttk.Label(frame, textvariable=self.status_var, wraplength=330).grid(
-            column=0, row=3, columnspan=2, sticky="w", pady=(8, 0)
+        self.status_var = tk.StringVar(value="Looking up your account via Steam...")
+        ttk.Label(frame, textvariable=self.status_var, wraplength=340).grid(
+            column=0, row=1, columnspan=2, sticky="w", pady=(12, 0)
         )
 
         self.autostart_var = tk.BooleanVar(value=False)
@@ -85,81 +64,83 @@ class FirstRunWizard:
                 frame,
                 text="Start automatically with Windows",
                 variable=self.autostart_var,
-            ).grid(column=0, row=4, columnspan=2, sticky="w", pady=(10, 0))
+            ).grid(column=0, row=2, columnspan=2, sticky="w", pady=(10, 0))
 
-        self.save_btn = ttk.Button(frame, text="Save & Start", command=self._save)
-        self.save_btn.grid(column=1, row=5, sticky="e", pady=(15, 0))
+        buttons = ttk.Frame(frame)
+        buttons.grid(column=0, row=3, columnspan=2, sticky="e", pady=(15, 0))
+        self.retry_btn = ttk.Button(buttons, text="Retry", command=self._retry)
+        self.retry_btn.grid(column=0, row=0, padx=(0, 8))
+        self.retry_btn.state(["disabled"])
+        self.save_btn = ttk.Button(buttons, text="Save & Start", command=self._save)
+        self.save_btn.grid(column=1, row=0)
+        self.save_btn.state(["disabled"])
 
-        # Try to find the player's own account through their Steam login -
-        # no typing needed, and it stops people entering someone else's name.
-        self.detected_player = None
-        self.status_var.set("Looking up your account via Steam...")
         threading.Thread(target=self._detect_worker, daemon=True).start()
 
     def _detect_worker(self) -> None:
         player = None
+        error = None
         steam64 = steam.get_logged_in_steam64()
-        if steam64:
+        if not steam64:
+            error = (
+                "Steam wasn't found on this PC. The app identifies your "
+                "Faceit account through your Steam login, so Steam must be "
+                "installed and logged in. Start Steam and press Retry."
+            )
+        else:
             try:
                 player = self.api.get_player_by_steam_id(steam64)
             except FaceitAPIError as e:
                 logger.info(f"No Faceit account found for local Steam login: {e}")
+                if "not found" in str(e).lower():
+                    error = (
+                        "No Faceit account is linked to the Steam account "
+                        "logged in on this PC. Log into Steam with the "
+                        "account you play Faceit on, then press Retry."
+                    )
+                else:
+                    error = (
+                        "Couldn't reach Faceit. Check your internet "
+                        "connection and press Retry."
+                    )
         try:
-            self.root.after(0, lambda: self._on_detected(player))
+            self.root.after(0, lambda: self._on_detected(player, error))
         except RuntimeError:
             pass  # window already closed
 
-    def _on_detected(self, player) -> None:
+    def _on_detected(self, player, error) -> None:
         if player:
             self.detected_player = player
-            self.nickname_var.set(player.nickname)
-            self.entry.state(["disabled"])
+            self.save_btn.state(["!disabled"])
+            self.retry_btn.state(["disabled"])
             self.status_var.set(
-                f"Found your account via Steam: {player.nickname} - Level "
+                f"Found your account: {player.nickname} - Level "
                 f"{player.skill_level}, {player.elo:,} ELO.\n"
-                "Wrong account? Log into Steam with yours and restart this app."
+                "Wrong account? Log into Steam with yours and press Retry."
             )
+            self.retry_btn.state(["!disabled"])
         else:
-            self.status_var.set(
-                "Couldn't find your account via Steam - type your Faceit "
-                "nickname above."
-            )
+            self.retry_btn.state(["!disabled"])
+            self.status_var.set(error or "Detection failed. Press Retry.")
+
+    def _retry(self) -> None:
+        self.retry_btn.state(["disabled"])
+        self.save_btn.state(["disabled"])
+        self.detected_player = None
+        self.status_var.set("Looking up your account via Steam...")
+        threading.Thread(target=self._detect_worker, daemon=True).start()
 
     def _save(self) -> None:
-        if self.detected_player is not None:
-            # Account already verified through the Steam login
-            self._on_validated(self.detected_player, None)
+        if self.detected_player is None:
             return
-        nickname = self.nickname_var.get().strip()
-        if not nickname:
-            self.status_var.set("Please enter your nickname.")
-            return
-        self.save_btn.state(["disabled"])
-        self.status_var.set("Checking nickname on Faceit...")
-
-        def worker():
-            player, error = _validate_nickname(self.api, nickname)
-            self.root.after(0, lambda: self._on_validated(player, error))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _on_validated(self, player, error) -> None:
-        if error:
-            self.save_btn.state(["!disabled"])
-            self.status_var.set(error)
-            return
-        self.config.update({"faceit_nickname": player.nickname})
+        self.config.update({"faceit_nickname": self.detected_player.nickname})
         if autostart.is_supported() and self.autostart_var.get():
             autostart.enable()
         self.completed = True
-        self.status_var.set(
-            f"Found {player.nickname} - Level {player.skill_level}, "
-            f"{player.elo:,} ELO. Starting!"
-        )
-        self.root.after(1200, self.root.destroy)
+        self.root.destroy()
 
     def run(self) -> bool:
-        """Show the wizard. Returns True once a nickname was saved."""
+        """Show the wizard. Returns True once an account was confirmed."""
         self.root.mainloop()
         return self.completed
 
@@ -170,17 +151,14 @@ def run_first_run_wizard(config: Config, api: FaceitAPI) -> bool:
 
 
 class _SettingsWindow:
-    """Settings window: nickname, display toggles, auto-start."""
+    """Settings window: display toggles and auto-start.
 
-    def __init__(
-        self,
-        config: Config,
-        api: FaceitAPI,
-        on_nickname_change: Callable[[str], tuple[bool, Optional[str]]],
-    ):
+    The tracked account is not editable: it is always the Faceit account
+    linked to the local Steam login.
+    """
+
+    def __init__(self, config: Config):
         self.config = config
-        self.api = api
-        self.on_nickname_change = on_nickname_change
 
         self.root = tk.Tk()
         self.root.title("Faceit Discord Status - Settings")
@@ -190,10 +168,9 @@ class _SettingsWindow:
         frame = ttk.Frame(self.root, padding=15)
         frame.grid()
 
-        ttk.Label(frame, text="Faceit nickname:").grid(column=0, row=0, sticky="w")
-        self.nickname_var = tk.StringVar(value=config.faceit_nickname)
-        ttk.Entry(frame, textvariable=self.nickname_var, width=28).grid(
-            column=1, row=0, sticky="we", padx=(8, 0)
+        account = config.faceit_nickname or "not detected yet"
+        ttk.Label(frame, text=f"Account: {account} (detected via your Steam login)").grid(
+            column=0, row=0, columnspan=2, sticky="w"
         )
 
         ttk.Label(frame, text="Show in Discord status:", font=("Segoe UI", 9, "bold")).grid(
@@ -221,46 +198,16 @@ class _SettingsWindow:
             ).grid(column=0, row=next_row, columnspan=2, sticky="w", pady=(12, 0))
         next_row += 1
 
-        self.status_var = tk.StringVar()
-        ttk.Label(frame, textvariable=self.status_var, wraplength=330).grid(
-            column=0, row=next_row, columnspan=2, sticky="w", pady=(8, 0)
-        )
-        next_row += 1
-
         buttons = ttk.Frame(frame)
         buttons.grid(column=0, row=next_row, columnspan=2, sticky="e", pady=(12, 0))
-        self.save_btn = ttk.Button(buttons, text="Save", command=self._save)
-        self.save_btn.grid(column=0, row=0, padx=(0, 8))
+        ttk.Button(buttons, text="Save", command=self._save).grid(
+            column=0, row=0, padx=(0, 8)
+        )
         ttk.Button(buttons, text="Cancel", command=self.root.destroy).grid(
             column=1, row=0
         )
 
     def _save(self) -> None:
-        nickname = self.nickname_var.get().strip()
-        if not nickname:
-            self.status_var.set("Nickname cannot be empty.")
-            return
-        self.save_btn.state(["disabled"])
-        self.status_var.set("Saving...")
-
-        def worker():
-            error = None
-            if nickname != self.config.faceit_nickname:
-                ok, err = self.on_nickname_change(nickname)
-                if not ok:
-                    error = (
-                        f"Couldn't switch to '{nickname}': {err}. "
-                        "Check the spelling (names are case-sensitive)."
-                    )
-            self.root.after(0, lambda: self._on_saved(error))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _on_saved(self, error: Optional[str]) -> None:
-        if error:
-            self.save_btn.state(["!disabled"])
-            self.status_var.set(error)
-            return
         self.config.update(
             {key: var.get() for key, var in self.option_vars.items()}
         )
@@ -279,11 +226,7 @@ _settings_lock = threading.Lock()
 _settings_open = False
 
 
-def open_settings_window(
-    config: Config,
-    api: FaceitAPI,
-    on_nickname_change: Callable[[str], tuple[bool, Optional[str]]],
-) -> None:
+def open_settings_window(config: Config) -> None:
     """Open the settings window in a background thread (one at a time).
 
     pystray owns the main thread's message loop, so each settings window gets
@@ -298,7 +241,7 @@ def open_settings_window(
     def runner():
         global _settings_open
         try:
-            _SettingsWindow(config, api, on_nickname_change).run()
+            _SettingsWindow(config).run()
         except Exception:
             logger.exception("Settings window crashed")
         finally:
